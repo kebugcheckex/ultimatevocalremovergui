@@ -57,6 +57,7 @@ import sys
 import yaml
 from ml_collections import ConfigDict
 from collections import Counter
+from uvr.config.models import AppSettings
 from uvr.config import persistence as persistence_helpers
 from uvr.domain import audio_tools as audio_tools_module
 from uvr.domain import ensemble as ensemble_module
@@ -268,7 +269,12 @@ if not os.path.isdir(SAMPLE_CLIP_PATH):
     os.mkdir(SAMPLE_CLIP_PATH)
 
 model_hash_table = {}
-data = load_data(DEFAULT_DATA)
+data = persistence_helpers.load_settings(DEFAULT_DATA).to_legacy_dict()
+
+
+def normalize_app_settings_dict(data: dict | None) -> dict:
+    """Normalize legacy settings dicts against the current defaults."""
+    return AppSettings.from_legacy_dict(data, DEFAULT_DATA).to_legacy_dict()
 
 def drop(event, accept_mode: str = 'files'):
     path = event.data
@@ -6699,11 +6705,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
     def load_saved_vars(self, data):
         """Initializes primary Tkinter vars"""
-        
-        for key, value in DEFAULT_DATA.items():
-            if not key in data.keys():
-                data = {**data, **{key:value}}
-                data['batch_size'] = DEF_OPT
+        data = normalize_app_settings_dict(data)
 
         ## ADD_BUTTON
         self.chosen_process_method_var = tk.StringVar(value=data['chosen_process_method'])
@@ -6847,11 +6849,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
    
     def load_saved_settings(self, loaded_setting: dict, process_method=None, is_default_reset=False):
         """Loads user saved application settings or resets to default"""
-        
-        for key, value in DEFAULT_DATA.items():
-            if not key in loaded_setting.keys():
-                loaded_setting = {**loaded_setting, **{key:value}}
-                loaded_setting['batch_size'] = DEF_OPT
+        loaded_setting = normalize_app_settings_dict(loaded_setting)
                 
         is_default_reset = True if process_method == ENSEMBLE_MODE or is_default_reset else False
         
@@ -7115,8 +7113,13 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
             'demucs_stems': self.demucs_stems_var.get(),
             'mdx_stems': self.mdxnet_stems_var.get()}
 
+        persisted_settings = AppSettings.from_legacy_dict(
+            {**main_settings, **other_data, **user_saved_extras},
+            DEFAULT_DATA,
+        )
+
         if app_close:
-            save_data(data={**main_settings, **other_data})
+            persistence_helpers.save_settings(persisted_settings)
             
             if self.thread_check(self.active_download_thread):
                 self.error_dialoge(EXIT_DOWNLOAD_ERROR)
@@ -7142,9 +7145,9 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
             self.destroy()
             
         elif is_auto_save:
-            save_data(data={**main_settings, **other_data})
+            persistence_helpers.save_settings(persisted_settings)
         else:
-            return {**main_settings, **user_saved_extras}
+            return persisted_settings.to_legacy_dict()
 
     def get_settings_list(self):
         
