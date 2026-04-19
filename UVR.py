@@ -57,6 +57,12 @@ import sys
 import yaml
 from ml_collections import ConfigDict
 from collections import Counter
+from uvr.config import persistence as persistence_helpers
+from uvr.domain import audio_tools as audio_tools_module
+from uvr.domain import ensemble as ensemble_module
+from uvr.ui import widgets as widgets_module
+from uvr.utils import system as system_helpers
+from uvr.utils import tk_helpers as tk_helpers_module
 
 # if not is_macos:
 #     import torch_directml
@@ -157,36 +163,13 @@ def close_process(q:queue.Queue):
     thread = KThread(target=close_splash)
     thread.start()
 
-def save_data(data):
-    """
-    Saves given data as a .pkl (pickle) file
+def save_data(data, data_file='data.pkl'):
+    """Compatibility wrapper for extracted persistence helper."""
+    persistence_helpers.save_data(data=data, data_file=data_file)
 
-    Paramters:
-        data(dict):
-            Dictionary containing all the necessary data to save
-    """
-    # Open data file, create it if it does not exist
-    with open('data.pkl', 'wb') as data_file:
-        pickle.dump(data, data_file)
-
-def load_data() -> dict:
-    """
-    Loads saved pkl file and returns the stored data
-
-    Returns(dict):
-        Dictionary containing all the saved data
-    """
-    try:
-        with open('data.pkl', 'rb') as data_file:  # Open data file
-            data = pickle.load(data_file)
-
-        return data
-    except (ValueError, FileNotFoundError):
-        # Data File is corrupted or not found so recreate it
-
-        save_data(data=DEFAULT_DATA)
-
-        return load_data()
+def load_data(default_data=DEFAULT_DATA, data_file='data.pkl') -> dict:
+    """Compatibility wrapper for extracted persistence helper."""
+    return persistence_helpers.load_data(default_data=default_data, data_file=data_file)
 
 def load_model_hash_data(dictionary):
     '''Get the model hash dictionary'''
@@ -285,7 +268,7 @@ if not os.path.isdir(SAMPLE_CLIP_PATH):
     os.mkdir(SAMPLE_CLIP_PATH)
 
 model_hash_table = {}
-data = load_data()
+data = load_data(DEFAULT_DATA)
 
 def drop(event, accept_mode: str = 'files'):
     path = event.data
@@ -7245,6 +7228,32 @@ def extract_stems(audio_file_base, export_path):
     filtered_lst = [item for item in stem_list if counter[item] > 1]
 
     return list(set(filtered_lst))
+
+
+system_helpers.configure_runtime(sys.modules[__name__])
+tk_helpers_module.configure_runtime(sys.modules[__name__])
+ensemble_module.configure_runtime(sys.modules[__name__])
+audio_tools_module.configure_runtime(sys.modules[__name__])
+widgets_module.configure_runtime(sys.modules[__name__])
+
+save_data = persistence_helpers.save_data
+load_data = persistence_helpers.load_data
+get_execution_time = system_helpers.get_execution_time
+right_click_release_linux = system_helpers.right_click_release_linux
+close_process = system_helpers.close_process
+extract_stems = system_helpers.extract_stems
+drop = tk_helpers_module.drop
+read_bulliten_text_mac = tk_helpers_module.read_bulliten_text_mac
+open_link = tk_helpers_module.open_link
+auto_hyperlink = tk_helpers_module.auto_hyperlink
+vip_downloads = tk_helpers_module.vip_downloads
+Ensembler = ensemble_module.Ensembler
+AudioTools = audio_tools_module.AudioTools
+ToolTip = widgets_module.ToolTip
+ListboxBatchFrame = widgets_module.ListboxBatchFrame
+ComboBoxEditableMenu = widgets_module.ComboBoxEditableMenu
+ComboBoxMenu = widgets_module.ComboBoxMenu
+ThreadSafeConsole = widgets_module.ThreadSafeConsole
 
 if __name__ == "__main__":
 
