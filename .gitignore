@@ -1,3 +1,6 @@
-__pycache__
-
+__pycache__/
+data/
+data.pkl
+gui_data/cr_text.txt
+models/**/*.pth
 .codex

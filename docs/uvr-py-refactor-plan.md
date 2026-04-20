@@ -1,5 +1,45 @@
 # UVR.py Refactor Plan
 
+## Status
+
+Current implementation status as of this refactor pass:
+
+- Phase 1: mostly complete
+- Phase 2: complete for settings typing/persistence normalization
+- Phase 3: complete via extracted `ModelData` with typed settings/resolvers
+- Phase 4: complete via extracted processing controller
+- Phase 5: partially complete
+- PySide6 pivot readiness: not ready yet; a focused stabilization pass is still recommended before replacing Tk
+
+The refactor is already live in `UVR.py` through compatibility imports, wrapper classes, and delegated methods. The new modules are not just planned; they are referenced by the application today.
+
+Current extracted modules:
+
+```text
+uvr/
+  config/
+    models.py
+    persistence.py
+  domain/
+    audio_tools.py
+    ensemble.py
+    model_data.py
+  services/
+    processing.py
+  ui/
+    actions.py
+    widgets.py
+  utils/
+    system.py
+    tk_helpers.py
+```
+
+Important implementation note:
+
+- `UVR.py` still contains some legacy bodies for compatibility and incremental cleanup.
+- In several places the extracted module is the active runtime implementation even if an older in-file version still exists nearby.
+- This is intentional and keeps the refactor low-risk while shrinking the architectural surface of `UVR.py`.
+
 ## Goal
 
 Break down `UVR.py` into smaller, typed modules so the application becomes:
@@ -28,10 +68,15 @@ This plan is intentionally structured to reduce risk. The first phases focus on 
 - downloads and online refresh
 - process orchestration and threading
 
-The two most important architectural issues are:
+The two most important architectural issues were:
 
 1. `MainWindow` owns too much behavior.
 2. `ModelData` is UI-coupled because it reads directly from global `root` and Tk variables.
+
+Current highest-priority architectural issues are now:
+
+1. `MainWindow` still owns too much behavior, especially layout, menus, popups, file/input flows, and shared mutable UI state.
+2. Several extracted modules still depend on Tk-era runtime state, especially `AudioTools`, `Ensembler`, parts of `ProcessingController`, and Tk-specific helper flows.
 
 ## Refactor Principles
 
@@ -79,7 +124,7 @@ uvr/
     tk_helpers.py
 ```
 
-This structure should be introduced incrementally. It does not need to exist all at once in the first PR.
+This structure has been introduced incrementally. The currently implemented subset is listed in the status section above. The remaining items are still target structure, not yet fully extracted.
 
 ## Module Responsibilities
 
@@ -97,6 +142,13 @@ This structure should be introduced incrementally. It does not need to exist all
 - process/job request model
 - download/config request model
 
+Current status:
+
+- implemented
+- includes `AppSettings`
+- includes typed subsets such as `ProcessSettings`, `ModelSelection`, and `DownloadSettings`
+- currently acts as a compatibility layer around the legacy dict-shaped settings model
+
 Examples:
 
 - `AppSettings`
@@ -112,6 +164,12 @@ Examples:
 
 This is the correct place to replace the current root-level `data.pkl` behavior with a safer approach later.
 
+Current status:
+
+- implemented
+- `UVR.py` startup now loads normalized settings through this module
+- includes typed `load_settings()` / `save_settings()` alongside legacy-compatible `load_data()` / `save_data()`
+
 ### `uvr/domain/model_data.py`
 
 - extracted and refactored `ModelData`
@@ -120,17 +178,38 @@ This is the correct place to replace the current root-level `data.pkl` behavior 
 
 This is the most important architectural seam in the whole refactor.
 
+Current status:
+
+- implemented
+- `ModelData` now lives in this module
+- direct `root` access has been replaced with explicit `ModelDataSettings` and `ModelDataResolvers`
+- `UVR.py` currently exposes a compatibility wrapper class `ModelData(model_data_module.ModelData)`
+
 ### `uvr/domain/ensemble.py`
 
 - extracted `Ensembler`
 - typed methods and arguments
-- no Tk dependencies
+- target is no Tk dependencies
+
+Current status:
+
+- implemented
+- active via alias rebinding in `UVR.py`
+- still reads `runtime.root` state directly
+- needs one more refactor pass before it is framework-neutral
 
 ### `uvr/domain/audio_tools.py`
 
 - extracted `AudioTools`
 - typed method signatures
-- no Tk dependencies
+- target is no Tk dependencies
+
+Current status:
+
+- implemented
+- active via alias rebinding in `UVR.py`
+- still reads `runtime.root` state directly
+- needs one more refactor pass before it is framework-neutral
 
 ### `uvr/services/processing.py`
 
@@ -147,10 +226,23 @@ This module should own logic currently spread across:
 - progress update helpers
 - parts of validation and job dispatch
 
+Current status:
+
+- implemented
+- `MainWindow` now delegates process lifecycle methods to `ProcessingController`
+- the UI-facing method names still exist in `UVR.py`, but they are thin delegation shims
+- still contains Tk-coupled behavior in places, including dialog flow and some Tk variable usage
+- needs a callback- or adapter-based boundary before a clean Qt migration
+
 ### `uvr/services/cache.py`
 
 - source caching and lookup logic
 - cache clearing and update rules
+
+Current status:
+
+- not extracted yet
+- cache/source helpers still live in `UVR.py`
 
 ### `uvr/services/downloads.py`
 
@@ -158,6 +250,11 @@ This module should own logic currently spread across:
 - download validation
 - download queue/state handling
 - download post-actions
+
+Current status:
+
+- not extracted yet
+- download and online-refresh logic still lives in `UVR.py`
 
 ### `uvr/ui/widgets.py`
 
@@ -167,6 +264,11 @@ This module should own logic currently spread across:
 - `ComboBoxMenu`
 - `ThreadSafeConsole`
 
+Current status:
+
+- implemented
+- active via alias rebinding in `UVR.py`
+
 ### `uvr/ui/main_window.py`
 
 - composition root for the Tk UI
@@ -174,6 +276,12 @@ This module should own logic currently spread across:
 - delegates business logic to service modules
 
 The long-term goal is for this module to become thin.
+
+Current status:
+
+- not created yet
+- `MainWindow` still lives in `UVR.py`
+- however, `MainWindow` now delegates significant logic to extracted modules
 
 ### `uvr/ui/actions.py`
 
@@ -186,6 +294,16 @@ This should own logic such as:
 - `selection_action_*`
 - `update_*`
 - widget enable/disable transitions
+
+Current status:
+
+- implemented
+- currently owns a first extraction slice of UI state/actions:
+  - `selection_action_*`
+  - main widget state transitions
+  - stem/ensemble state update helpers
+  - saved-settings action helpers
+- layout/build methods and menu/popup logic are still in `UVR.py`
 
 ### `uvr/ui/menus/`
 
@@ -203,6 +321,11 @@ Suggested breakdown:
 - `secondary_model.py`
 - `popups.py`
 
+Current status:
+
+- not started yet
+- menu and popup code still lives in `UVR.py`
+
 ### `uvr/utils/system.py`
 
 - OS-specific helper functions
@@ -211,11 +334,32 @@ Suggested breakdown:
 - notification sound helpers
 - generic non-UI utility functions
 
+Current status:
+
+- partially implemented
+- extracted now:
+  - `get_execution_time`
+  - `right_click_release_linux`
+  - `close_process`
+  - `extract_stems`
+- planned but not yet moved:
+  - `play_notification_sound`
+
 ### `uvr/utils/tk_helpers.py`
 
 - Tk hyperlink helpers
 - drag-and-drop helper functions
 - other small Tk-specific standalone functions
+
+Current status:
+
+- implemented
+- extracted now:
+  - `drop`
+  - `read_bulliten_text_mac`
+  - `open_link`
+  - `auto_hyperlink`
+  - `vip_downloads`
 
 ## First-Cut Extraction Plan
 
@@ -230,6 +374,12 @@ Move these first:
 - `Ensembler`
 - `AudioTools`
 - custom widget classes
+
+Status:
+
+- completed in practice, with one small deviation from the original list:
+  - `play_notification_sound` has not been extracted yet
+- extracted modules are already referenced by `UVR.py`
 
 Recommended initial file moves:
 
@@ -256,11 +406,13 @@ Recommended initial file moves:
 
 5. `uvr/utils/system.py`
    Move:
-   - `play_notification_sound`
    - `get_execution_time`
    - `right_click_release_linux`
    - `close_process`
    - `extract_stems`
+
+   Deferred:
+   - `play_notification_sound`
 
 6. `uvr/utils/tk_helpers.py`
    Move:
@@ -275,6 +427,11 @@ Outcome of phase 1:
 - `UVR.py` gets smaller
 - almost no application behavior changes
 - new module structure starts to exist
+
+Actual outcome so far:
+
+- achieved
+- `UVR.py` now uses the extracted modules through compatibility imports and aliases
 
 ### Phase 2: Typed Config Layer
 
@@ -292,6 +449,12 @@ Then:
 - stop passing raw dicts around where possible
 - make persistence load/save typed models
 - add a compatibility conversion layer for legacy data
+
+Status:
+
+- completed
+- `AppSettings` is the compatibility model currently normalizing legacy dict data against `DEFAULT_DATA`
+- typed persistence is active at startup and save time
 
 Outcome of phase 2:
 
@@ -312,6 +475,12 @@ Target:
 - `ModelData` accepts typed settings/config objects
 - no Tk imports
 - no global `root` dependency
+
+Status:
+
+- completed
+- `ModelData` now accepts typed settings and resolver callbacks instead of reading Tk variables directly
+- popup-driven model metadata lookup is still supported via injected resolvers from `UVR.py`
 
 This phase is the highest-value architectural change.
 
@@ -350,6 +519,12 @@ Target design:
   - completion
   - errors
 
+Status:
+
+- completed
+- `uvr/services/processing.py` now contains `ProcessingController`
+- `MainWindow` still exposes the old process methods, but they delegate to the controller
+
 Outcome of phase 4:
 
 - `MainWindow` stops being the process engine
@@ -381,9 +556,56 @@ Suggested groups:
    - sample creation
    - input validation
 
+Status:
+
+- partially complete
+- extracted so far:
+  - `uvr/ui/actions.py`
+  - selection handlers
+  - widget state updates
+  - saved-settings action flow
+  - stem/ensemble UI transitions
+- still remaining in `UVR.py`:
+  - layout/build methods
+  - menu/popup methods
+  - most file/input helper logic
+
 Outcome of phase 5:
 
 - `MainWindow` becomes a thin composition shell
+
+Current reality:
+
+- `MainWindow` is thinner than before, but not yet thin
+- the biggest remaining UI weight is still layout/menu construction
+- file dialogs, input/path handling, and popup orchestration also still live primarily in `UVR.py`
+
+## Pre-PySide6 Stabilization Pass
+
+The project is closer to a GUI pivot than before, but it is not yet at the point where replacing Tk with PySide6 is the lowest-risk next step.
+
+What is already in good shape:
+
+- typed settings/persistence are in place
+- `ModelData` has a real non-Tk seam
+- processing orchestration has been extracted into a service module
+
+What still blocks a clean Qt rewrite:
+
+- `MainWindow` still owns too much UI composition and state
+- `AudioTools` still reads `runtime.root` and Tk-backed values
+- `Ensembler` still reads `runtime.root` and Tk-backed values
+- `ProcessingController` still contains Tk-specific interactions
+- file-dialog and drag/drop flows are still centered on Tk behavior
+
+Recommended next pass before starting PySide6:
+
+1. finish Phase 5 by extracting menu/popup modules and file/input helpers out of `MainWindow`
+2. refactor `AudioTools` and `Ensembler` to accept typed settings/context objects instead of reading `runtime.root`
+3. remove Tk types and dialog assumptions from `ProcessingController` in favor of callbacks or a UI adapter
+4. introduce a framework-neutral app-state or view-model layer so Tk variables stop being the source of truth
+
+This is intentionally a narrow pass. The goal is not to continue refactoring indefinitely; it is to complete the remaining boundary work that will make the PySide6 migration straightforward instead of coupled to unfinished cleanup.
 
 ## Type Hint Standard
 
@@ -406,17 +628,34 @@ ConsoleCallback = Callable[[str], None]
 
 ## Risks and Constraints
 
-### Major Risk: `ModelData`
+### Historical Risk: `ModelData`
 
-This is the main blocker to a clean architecture because it reads directly from Tk/global state.
+This was the main blocker to a clean architecture because it read directly from Tk/global state.
+
+Current status:
+
+- the primary coupling has been removed
+- residual risk now comes from compatibility wrappers and resolver callbacks still originating in `UVR.py`
 
 ### Major Risk: Shared Mutable State
 
 `MainWindow` currently owns and mutates a large amount of shared state. Extractions must be careful not to create circular imports or hidden side effects.
 
+Current status:
+
+- still relevant
+- the refactor currently uses runtime binding and UI/service delegation to avoid a large rewrite
+- this keeps behavior stable, but means some modules still depend on `UVR.py` as the composition/runtime source
+- this runtime binding strategy is acceptable for the current incremental refactor, but it is not the ideal long-term boundary for a Qt rewrite
+
 ### Major Risk: Popup/Menu Coupling
 
 Many popup methods likely depend on widget state that is only implicit in `MainWindow`.
+
+Current status:
+
+- still relevant
+- this is the main reason `uvr/ui/menus/` has not been extracted yet
 
 ### Major Risk: Persistence Compatibility
 
@@ -459,11 +698,17 @@ The refactor is moving in the right direction if:
 
 ### Milestone 6
 
+- complete a pre-PySide6 stabilization pass
+- remove remaining `runtime.root` / Tk-variable access from service and domain paths
+- introduce framework-neutral UI callbacks or adapters where services still assume Tk dialogs or Tk state
+
+### Milestone 7
+
 - evaluate PySide6 or web UI migration after the backend/config boundaries are stable
 
 ## Recommendation
 
-Do not begin with a GUI rewrite.
+Do not begin the PySide6 rewrite yet.
 
 First:
 
@@ -471,5 +716,11 @@ First:
 2. isolate persistence
 3. decouple domain logic from Tk
 4. move process orchestration out of `MainWindow`
+5. complete the remaining UI-boundary stabilization work around menus, popups, file/input helpers, and Tk-coupled service paths
 
-After those steps, the codebase will be in a position where replacing Tk is a strategic choice instead of a full rewrite.
+Status against that recommendation today:
+
+- steps 1 through 4 are substantially complete
+- step 5 is still incomplete and is now the main blocker
+
+After that stabilization pass, the codebase will be in a position where replacing Tk with PySide6 is a strategic frontend migration instead of a mixed refactor/rewrite.

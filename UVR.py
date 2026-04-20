@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # GUI modules
 import time
 #start_time = time.time()
@@ -39,7 +41,6 @@ from gui_data.constants import *
 from gui_data.app_size_values import *
 from gui_data.error_handling import error_text, error_dialouge
 from gui_data.old_data_check import file_check, remove_unneeded_yamls, remove_temps
-from gui_data.tkinterdnd2 import TkinterDnD, DND_FILES
 from lib_v5.vr_network.model_param_init import ModelParameters
 from kthread import KThread
 from lib_v5 import spec_utils
@@ -49,7 +50,10 @@ from separate import (
     save_format, clear_gpu_cache,  # Utility functions
     cuda_available, mps_available, #directml_available,
 )
-from playsound import playsound
+try:
+    from playsound3 import playsound
+except ImportError:
+    from playsound import playsound
 from typing import List
 import onnx
 import re
@@ -64,9 +68,21 @@ from uvr.domain import ensemble as ensemble_module
 from uvr.domain import model_data as model_data_module
 from uvr.services import processing as processing_service_module
 from uvr.ui import actions as ui_actions_module
+from uvr.ui import file_inputs as ui_file_inputs_module
 from uvr.ui import widgets as widgets_module
 from uvr.utils import system as system_helpers
 from uvr.utils import tk_helpers as tk_helpers_module
+
+ENABLE_DRAG_AND_DROP = os.environ.get("UVR_ENABLE_DND", "").lower() in {"1", "true", "yes", "on"}
+TkinterDnD = None
+DND_FILES = None
+
+if ENABLE_DRAG_AND_DROP:
+    try:
+        from gui_data.tkinterdnd2 import TkinterDnD, DND_FILES
+    except Exception:
+        TkinterDnD = None
+        DND_FILES = None
 
 # if not is_macos:
 #     import torch_directml
@@ -103,7 +119,7 @@ def get_execution_time(function, name):
 
 PREVIOUS_PATCH_WIN = 'UVR_Patch_10_6_23_4_27'
 
-is_dnd_compatible = True
+is_dnd_compatible = ENABLE_DRAG_AND_DROP and TkinterDnD is not None
 banner_placement = -2
 
 if OPERATING_SYSTEM=="Darwin":
@@ -338,6 +354,49 @@ def build_model_data_settings() -> model_data_module.ModelDataSettings:
         is_chunk_demucs=root.is_chunk_demucs_var.get(),
         mdx_name_select_mapper=root.mdx_name_select_MAPPER,
         demucs_name_select_mapper=root.demucs_name_select_MAPPER,
+    )
+
+
+def build_audio_tool_settings() -> audio_tools_module.AudioToolSettings:
+    return audio_tools_module.AudioToolSettings(
+        export_path=root.export_path_var.get(),
+        wav_type_set=root.wav_type_set,
+        is_normalization=root.is_normalization_var.get(),
+        is_testing_audio=root.is_testing_audio_var.get(),
+        save_format=root.save_format_var.get(),
+        mp3_bit_set=root.mp3_bit_set_var.get(),
+        align_window=TIME_WINDOW_MAPPER[root.time_window_var.get()],
+        align_intro_val=INTRO_MAPPER[root.intro_analysis_var.get()],
+        db_analysis_val=VOLUME_MAPPER[root.db_analysis_var.get()],
+        is_save_align=root.is_save_align_var.get(),
+        is_match_silence=root.is_match_silence_var.get(),
+        is_spec_match=root.is_spec_match_var.get(),
+        phase_option=root.phase_option_var.get(),
+        phase_shifts=PHASE_SHIFTS_OPT[root.phase_shifts_var.get()],
+        time_stretch_rate=root.time_stretch_rate_var.get(),
+        pitch_rate=root.pitch_rate_var.get(),
+        is_time_correction=root.is_time_correction_var.get(),
+    )
+
+
+def build_ensembler_settings() -> ensemble_module.EnsemblerSettings:
+    chosen_ensemble = root.chosen_ensemble_var.get()
+    chosen_ensemble_name = chosen_ensemble.replace(" ", "_") if chosen_ensemble != CHOOSE_ENSEMBLE_OPTION else "Ensembled"
+    ensemble_main_stem = root.ensemble_main_stem_var.get().partition("/")
+    return ensemble_module.EnsemblerSettings(
+        is_save_all_outputs_ensemble=root.is_save_all_outputs_ensemble_var.get(),
+        chosen_ensemble_name=chosen_ensemble_name,
+        ensemble_type=root.ensemble_type_var.get(),
+        ensemble_main_stem_pair=(ensemble_main_stem[0], ensemble_main_stem[2]),
+        export_path=root.export_path_var.get(),
+        is_append_ensemble_name=root.is_append_ensemble_name_var.get(),
+        is_testing_audio=root.is_testing_audio_var.get(),
+        is_normalization=root.is_normalization_var.get(),
+        is_wav_ensemble=root.is_wav_ensemble_var.get(),
+        wav_type_set=root.wav_type_set,
+        mp3_bit_set=root.mp3_bit_set_var.get(),
+        save_format=root.save_format_var.get(),
+        choose_algorithm=root.choose_algorithm_var.get(),
     )
 
 
@@ -1685,6 +1744,26 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     def processing_controller(self):
         return processing_service_module.ProcessingController(self)
 
+    def set_processing_button_enabled(self, is_enabled: bool):
+        self.conversion_Button.configure(state="normal" if is_enabled else "disabled")
+
+    def confirm_stop_process_dialog(self) -> bool:
+        return messagebox.askyesno(
+            parent=self,
+            title=STOP_PROCESS_CONFIRM[0],
+            message=STOP_PROCESS_CONFIRM[1],
+        )
+
+    def confirm_processing_error_dialog(self, message: str) -> bool:
+        return messagebox.askyesno(
+            parent=self,
+            title=ERROR_OCCURED[0],
+            message=message,
+        )
+
+    def file_inputs(self):
+        return ui_file_inputs_module.MainWindowFileInputs(self)
+
     def ui_actions(self):
         return ui_actions_module.MainWindowActions(self)
     
@@ -2255,118 +2334,26 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     #--Input/Export Methods--
     
     def linux_filebox_fix(self, is_on=True):
-        fg_color_set = '#575757' if is_on else "#F6F6F7"
-        style = ttk.Style(self)
-        style.configure('TButton', foreground='#F6F6F7')
-        style.configure('TCheckbutton', foreground='#F6F6F7')
-        style.configure('TCombobox', foreground='#F6F6F7')
-        style.configure('TEntry', foreground='#F6F6F7')
-        style.configure('TLabel', foreground='#F6F6F7')
-        style.configure('TMenubutton', foreground='#F6F6F7')
-        style.configure('TRadiobutton', foreground='#F6F6F7')
-        gui_data.sv_ttk.set_theme("dark", MAIN_FONT_NAME, 10, fg_color_set=fg_color_set)
+        self.file_inputs().linux_filebox_fix(is_on)
 
     def show_file_dialog(self, text='Select Audio files', dialoge_type=None):
-        parent_win = root
-        is_linux = not is_windows and not is_macos
-        
-        if is_linux:
-            self.linux_filebox_fix()
-            top = tk.Toplevel(root)
-            top.withdraw()
-            top.protocol("WM_DELETE_WINDOW", lambda: None)
-            parent_win = top
-        
-        if dialoge_type == MULTIPLE_FILE:
-            filenames = filedialog.askopenfilenames(parent=parent_win, 
-                                                    title=text)
-        elif dialoge_type == MAIN_MULTIPLE_FILE:
-            filenames = filedialog.askopenfilenames(parent=parent_win, 
-                                                    title=text,
-                                                    initialfile='',
-                                                    initialdir=self.lastDir)
-        elif dialoge_type == SINGLE_FILE:
-            filenames = filedialog.askopenfilename(parent=parent_win, 
-                                                   title=text)
-        elif dialoge_type == CHOOSE_EXPORT_FIR:
-            filenames = filedialog.askdirectory(
-                                    parent=parent_win,
-                                    title=f'Select Folder',)
-            
-        if is_linux:
-            print("Is Linux")
-            self.linux_filebox_fix(False)
-            top.destroy()
-            
-        return filenames
+        return self.file_inputs().show_file_dialog(text=text, dialoge_type=dialoge_type)
 
     def input_select_filedialog(self):
         """Make user select music files"""
-
-        if self.lastDir is not None:
-            if not os.path.isdir(self.lastDir):
-                self.lastDir = None
-
-        paths = self.show_file_dialog(dialoge_type=MAIN_MULTIPLE_FILE)
-
-        if paths:  # Path selected
-            self.inputPaths = paths
-            
-            self.process_input_selections()
-            self.update_inputPaths()
+        self.file_inputs().input_select_filedialog()
 
     def export_select_filedialog(self):
         """Make user select a folder to export the converted files in"""
-
-        export_path = None
-        
-        path = self.show_file_dialog(dialoge_type=CHOOSE_EXPORT_FIR)
-
-        if path:  # Path selected
-            self.export_path_var.set(path)
-            export_path = self.export_path_var.get()
-            
-        return export_path
+        return self.file_inputs().export_select_filedialog()
      
     def update_inputPaths(self):
         """Update the music file entry"""
-        
-        if self.inputPaths:
-            if len(self.inputPaths) == 1:
-                text = self.inputPaths[0]
-            else:
-                count = len(self.inputPaths) - 1
-                file_text = 'file' if len(self.inputPaths) == 2 else 'files'
-                text = f"{self.inputPaths[0]}, +{count} {file_text}"
-        else:
-            # Empty Selection
-            text = ''
-            
-        self.inputPathsEntry_var.set(text)
+        self.file_inputs().update_input_paths()
 
     def select_audiofile(self, path=None, is_primary=True): 
         """Make user select music files"""
-            
-        vars = {
-            True: (self.fileOneEntry_Full_var, self.fileOneEntry_var, self.fileTwoEntry_Full_var, self.fileTwoEntry_var),
-            False: (self.fileTwoEntry_Full_var, self.fileTwoEntry_var, self.fileOneEntry_Full_var, self.fileOneEntry_var)
-        }
-
-        file_path_var, file_basename_var, file_path_2_var, file_basename_2_var = vars[is_primary]
-            
-        if not path:
-            path = self.show_file_dialog(text='Select Audio file', dialoge_type=SINGLE_FILE)
-
-        if path:  # Path selected
-            file_path_var.set(path)
-            file_basename_var.set(os.path.basename(path))
-            
-            if BATCH_MODE_DUAL in file_path_2_var.get():
-                file_path_2_var.set("")
-                file_basename_2_var.set("")
-
-            self.DualBatch_inputPaths = []
-            self.check_dual_paths()
+        self.file_inputs().select_audiofile(path=path, is_primary=is_primary)
             
     #--Utility Methods--
 
@@ -3230,12 +3217,13 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         right_frame = ListboxBatchFrame(menu_view_inputs_Frame, self.file_two_sub_var.get().title(), lambda:move_entry(False), self.left_img, self.img_mapper)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
 
-        left_frame.listbox.drop_target_register(DND_FILES)
-        right_frame.listbox.drop_target_register(DND_FILES)
-        left_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_1_LB))
-        right_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_2_LB))
-        left_frame.listbox.dnd_bind(right_click_button, lambda e: clear_all(e, FILE_1_LB))
-        right_frame.listbox.dnd_bind(right_click_button, lambda e: clear_all(e, FILE_2_LB))
+        if is_dnd_compatible:
+            left_frame.listbox.drop_target_register(DND_FILES)
+            right_frame.listbox.drop_target_register(DND_FILES)
+            left_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_1_LB))
+            right_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_2_LB))
+        left_frame.listbox.bind(right_click_button, lambda e: clear_all(e, FILE_1_LB))
+        right_frame.listbox.bind(right_click_button, lambda e: clear_all(e, FILE_2_LB))
 
         menu_view_inputs_bottom_Frame = self.menu_FRAME_SET(menu_batch_dual_top)
         menu_view_inputs_bottom_Frame.grid(row=1)
@@ -3256,40 +3244,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         self.menu_placement(menu_batch_dual_top, DUAL_AUDIO_PROCESSING, pop_up=True)
 
     def check_dual_paths(self, is_fill_menu=False):
-        
-        if self.DualBatch_inputPaths:
-            first_paths = tuple(self.DualBatch_inputPaths)
-            first_paths_len = len(first_paths)
-            first_paths = first_paths[0]
-            
-            if first_paths_len == 1:
-                file1_base_text = os.path.basename(first_paths[0])
-                file2_base_text = os.path.basename(first_paths[1])
-            else:
-                first_paths_len = first_paths_len - 1
-                file1_base_text = f"{os.path.basename(first_paths[0])}, +{first_paths_len} file(s){BATCH_MODE_DUAL}"
-                file2_base_text = f"{os.path.basename(first_paths[1])}, +{first_paths_len} file(s){BATCH_MODE_DUAL}"
-            
-            self.fileOneEntry_var.set(file1_base_text)
-            self.fileOneEntry_Full_var.set(f"{first_paths[0]}")
-            self.fileTwoEntry_var.set(file2_base_text)
-            self.fileTwoEntry_Full_var.set(f"{first_paths[1]}")
-        else:
-            if is_fill_menu:
-                file_one = self.fileOneEntry_Full_var.get()
-                file_two = self.fileTwoEntry_Full_var.get()
-
-                if file_one and file_two and BATCH_MODE_DUAL not in file_one and BATCH_MODE_DUAL not in file_two:
-                    self.DualBatch_inputPaths = [(file_one, file_two)]
-            else:
-                if BATCH_MODE_DUAL in self.fileOneEntry_var.get():
-                    self.fileOneEntry_var.set("")
-                    self.fileOneEntry_Full_var.set("")
-                if BATCH_MODE_DUAL in self.fileTwoEntry_var.get():
-                    self.fileTwoEntry_var.set("")
-                    self.fileTwoEntry_Full_var.set("")
-            
-        return self.DualBatch_inputPaths
+        return self.file_inputs().check_dual_paths(is_fill_menu=is_fill_menu)
 
     def fill_gpu_list(self):
         try:
@@ -5866,23 +5821,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
     def process_input_selections(self):
         """Grabbing all audio files from selected directories."""
-        
-        input_list = []
-
-        ext = FFMPEG_EXT if not self.is_accept_any_input_var.get() else ANY_EXT
-
-        for i in self.inputPaths:
-            if os.path.isfile(i):
-                if i.endswith(ext):
-                    input_list.append(i)
-            for root, dirs, files in os.walk(i):
-                for file in files:
-                    if file.endswith(ext):
-                        file = os.path.join(root, file)
-                        if os.path.isfile(file):
-                            input_list.append(file)
-                                         
-        self.inputPaths = tuple(input_list)
+        self.file_inputs().process_input_selections()
 
     def process_check_wav_type(self):
         if self.wav_type_set_var.get() == '32-bit Float':
@@ -6546,6 +6485,7 @@ tk_helpers_module.configure_runtime(sys.modules[__name__])
 model_data_module.configure_runtime(sys.modules[__name__])
 processing_service_module.configure_runtime(sys.modules[__name__])
 ui_actions_module.configure_runtime(sys.modules[__name__])
+ui_file_inputs_module.configure_runtime(sys.modules[__name__])
 ensemble_module.configure_runtime(sys.modules[__name__])
 audio_tools_module.configure_runtime(sys.modules[__name__])
 widgets_module.configure_runtime(sys.modules[__name__])

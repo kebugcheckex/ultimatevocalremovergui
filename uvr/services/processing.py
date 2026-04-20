@@ -56,7 +56,7 @@ class ProcessingController:
     def process_button_init(self) -> None:
         self.ui.auto_save()
         self.ui.conversion_Button_Text_var.set(runtime.WAIT_PROCESSING)
-        self.ui.conversion_Button.configure(state=runtime.tk.DISABLED)
+        self.ui.set_processing_button_enabled(False)
         self.ui.command_Text.clear()
 
     def process_get_base_text(self, total_files: int, file_num: int, is_dual: bool = False) -> str:
@@ -74,11 +74,7 @@ class ProcessingController:
     def confirm_stop_process(self) -> None:
         self.ui.auto_save()
         if self.ui.thread_check(self.ui.active_processing_thread):
-            confirm = runtime.messagebox.askyesno(
-                parent=runtime.root,
-                title=runtime.STOP_PROCESS_CONFIRM[0],
-                message=runtime.STOP_PROCESS_CONFIRM[1],
-            )
+            confirm = self.ui.confirm_stop_process_dialog()
             if confirm:
                 try:
                     self.ui.active_processing_thread.terminate()
@@ -93,16 +89,12 @@ class ProcessingController:
         self.ui.cached_sources_clear()
         self.ui.clear_cache_torch = True
         self.ui.conversion_Button_Text_var.set(runtime.START_PROCESSING)
-        self.ui.conversion_Button.configure(state=runtime.tk.NORMAL)
+        self.ui.set_processing_button_enabled(True)
         self.ui.progress_bar_main_var.set(0)
 
         if error:
             error_message_box_text = f"{runtime.error_dialouge(error)}{runtime.ERROR_OCCURED[1]}"
-            confirm = runtime.messagebox.askyesno(
-                parent=runtime.root,
-                title=runtime.ERROR_OCCURED[0],
-                message=error_message_box_text,
-            )
+            confirm = self.ui.confirm_processing_error_dialog(error_message_box_text)
             if confirm:
                 self.ui.is_confirm_error_var.set(True)
                 self.ui.clear_cache_torch = True
@@ -170,21 +162,23 @@ class ProcessingController:
 
         try:
             total_files = len(input_paths)
+            audio_tool_settings = runtime.build_audio_tool_settings()
+            ensembler_settings = runtime.build_ensembler_settings()
             if self.ui.chosen_audio_tool_var.get() == runtime.TIME_STRETCH:
-                audio_tool = runtime.AudioTools(runtime.TIME_STRETCH)
+                audio_tool = runtime.AudioTools(runtime.TIME_STRETCH, settings=audio_tool_settings)
                 self.ui.progress_bar_main_var.set(2)
             elif self.ui.chosen_audio_tool_var.get() == runtime.CHANGE_PITCH:
-                audio_tool = runtime.AudioTools(runtime.CHANGE_PITCH)
+                audio_tool = runtime.AudioTools(runtime.CHANGE_PITCH, settings=audio_tool_settings)
                 self.ui.progress_bar_main_var.set(2)
             elif self.ui.chosen_audio_tool_var.get() == runtime.MANUAL_ENSEMBLE:
-                audio_tool = runtime.Ensembler(is_manual_ensemble=True)
+                audio_tool = runtime.Ensembler(settings=ensembler_settings, is_manual_ensemble=True)
                 multiple_files = True
                 if total_files <= 1:
                     self.ui.command_Text.write(runtime.NOT_ENOUGH_ERROR_TEXT)
                     self.process_end()
                     return
             else:
-                audio_tool = runtime.AudioTools(self.ui.chosen_audio_tool_var.get())
+                audio_tool = runtime.AudioTools(self.ui.chosen_audio_tool_var.get(), settings=audio_tool_settings)
                 self.ui.progress_bar_main_var.set(2)
                 is_dual = True
 
@@ -268,7 +262,7 @@ class ProcessingController:
         is_secondary_stem_only: bool = False,
     ) -> tuple[Any, Any]:
         secondary_model_scale = None
-        secondary_model = runtime.tk.StringVar(value=runtime.NO_MODEL)
+        secondary_model_name = runtime.NO_MODEL
 
         if process_method == runtime.VR_ARCH_TYPE:
             secondary_model_vars = self.ui.vr_secondary_model_vars
@@ -278,24 +272,24 @@ class ProcessingController:
             secondary_model_vars = self.ui.demucs_secondary_model_vars
 
         if main_model_primary_stem in [runtime.VOCAL_STEM, runtime.INST_STEM]:
-            secondary_model = secondary_model_vars["voc_inst_secondary_model"]
+            secondary_model_name = secondary_model_vars["voc_inst_secondary_model"].get()
             secondary_model_scale = secondary_model_vars["voc_inst_secondary_model_scale"].get()
         if main_model_primary_stem in [runtime.OTHER_STEM, runtime.NO_OTHER_STEM]:
-            secondary_model = secondary_model_vars["other_secondary_model"]
+            secondary_model_name = secondary_model_vars["other_secondary_model"].get()
             secondary_model_scale = secondary_model_vars["other_secondary_model_scale"].get()
         if main_model_primary_stem in [runtime.DRUM_STEM, runtime.NO_DRUM_STEM]:
-            secondary_model = secondary_model_vars["drums_secondary_model"]
+            secondary_model_name = secondary_model_vars["drums_secondary_model"].get()
             secondary_model_scale = secondary_model_vars["drums_secondary_model_scale"].get()
         if main_model_primary_stem in [runtime.BASS_STEM, runtime.NO_BASS_STEM]:
-            secondary_model = secondary_model_vars["bass_secondary_model"]
+            secondary_model_name = secondary_model_vars["bass_secondary_model"].get()
             secondary_model_scale = secondary_model_vars["bass_secondary_model_scale"].get()
 
         if secondary_model_scale:
             secondary_model_scale = float(secondary_model_scale)
 
-        if secondary_model.get() != runtime.NO_MODEL:
+        if secondary_model_name != runtime.NO_MODEL:
             secondary_model = runtime.ModelData(
-                secondary_model.get(),
+                secondary_model_name,
                 is_secondary_model=True,
                 primary_model_primary_stem=main_model_primary_stem,
                 is_primary_model_primary_stem_only=is_primary_stem_only,
@@ -405,7 +399,8 @@ class ProcessingController:
 
         try:
             if self.ui.chosen_process_method_var.get() == runtime.ENSEMBLE_MODE:
-                model, ensemble = self.ui.assemble_model_data(), runtime.Ensembler()
+                model = self.ui.assemble_model_data()
+                ensemble = runtime.Ensembler(settings=runtime.build_ensembler_settings())
                 export_path, is_ensemble = ensemble.ensemble_folder_name, True
             if self.ui.chosen_process_method_var.get() == runtime.VR_ARCH_PM:
                 model = self.ui.assemble_model_data(self.ui.vr_model_var.get(), runtime.VR_ARCH_TYPE)

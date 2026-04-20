@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 runtime: Any | None = None
 
@@ -13,29 +14,51 @@ def configure_runtime(module: Any) -> None:
     runtime = module
 
 
+@dataclass(frozen=True)
+class AudioToolSettings:
+    export_path: str
+    wav_type_set: Any
+    is_normalization: bool
+    is_testing_audio: bool
+    save_format: str
+    mp3_bit_set: str
+    align_window: int
+    align_intro_val: Any
+    db_analysis_val: Any
+    is_save_align: bool
+    is_match_silence: bool
+    is_spec_match: bool
+    phase_option: str
+    phase_shifts: Any
+    time_stretch_rate: str
+    pitch_rate: str
+    is_time_correction: bool
+
+
 class AudioTools:
-    def __init__(self, audio_tool: str):
+    def __init__(self, audio_tool: str, settings: AudioToolSettings):
         time_stamp = round(runtime.time.time())
         self.audio_tool = audio_tool
-        self.main_export_path = Path(runtime.root.export_path_var.get())
-        self.wav_type_set = runtime.root.wav_type_set
-        self.is_normalization = runtime.root.is_normalization_var.get()
-        self.is_testing_audio = f"{time_stamp}_" if runtime.root.is_testing_audio_var.get() else ""
-        self.save_format = (
-            lambda save_path: runtime.save_format(
-                save_path,
-                runtime.root.save_format_var.get(),
-                runtime.root.mp3_bit_set_var.get(),
-            )
+        self.main_export_path = Path(settings.export_path)
+        self.wav_type_set = settings.wav_type_set
+        self.is_normalization = settings.is_normalization
+        self.is_testing_audio = f"{time_stamp}_" if settings.is_testing_audio else ""
+        self.save_format: Callable[[str], None] = lambda save_path: runtime.save_format(
+            save_path,
+            settings.save_format,
+            settings.mp3_bit_set,
         )
-        self.align_window = runtime.TIME_WINDOW_MAPPER[runtime.root.time_window_var.get()]
-        self.align_intro_val = runtime.INTRO_MAPPER[runtime.root.intro_analysis_var.get()]
-        self.db_analysis_val = runtime.VOLUME_MAPPER[runtime.root.db_analysis_var.get()]
-        self.is_save_align = runtime.root.is_save_align_var.get()
-        self.is_match_silence = runtime.root.is_match_silence_var.get()
-        self.is_spec_match = runtime.root.is_spec_match_var.get()
-        self.phase_option = runtime.root.phase_option_var.get()
-        self.phase_shifts = runtime.PHASE_SHIFTS_OPT[runtime.root.phase_shifts_var.get()]
+        self.align_window = settings.align_window
+        self.align_intro_val = settings.align_intro_val
+        self.db_analysis_val = settings.db_analysis_val
+        self.is_save_align = settings.is_save_align
+        self.is_match_silence = settings.is_match_silence
+        self.is_spec_match = settings.is_spec_match
+        self.phase_option = settings.phase_option
+        self.phase_shifts = settings.phase_shifts
+        self.time_stretch_rate = float(settings.time_stretch_rate)
+        self.pitch_rate = float(settings.pitch_rate)
+        self.is_time_correction = settings.is_time_correction
 
     def align_inputs(
         self,
@@ -99,14 +122,10 @@ class AudioTools:
 
     def pitch_or_time_shift(self, audio_file: str, audio_file_base: str) -> None:
         is_time_correction = True
-        rate = (
-            float(runtime.root.time_stretch_rate_var.get())
-            if self.audio_tool == runtime.TIME_STRETCH
-            else float(runtime.root.pitch_rate_var.get())
-        )
+        rate = self.time_stretch_rate if self.audio_tool == runtime.TIME_STRETCH else self.pitch_rate
         is_pitch = self.audio_tool != runtime.TIME_STRETCH
         if is_pitch:
-            is_time_correction = True if runtime.root.is_time_correction_var.get() else False
+            is_time_correction = self.is_time_correction
         file_text = runtime.TIME_TEXT if self.audio_tool == runtime.TIME_STRETCH else runtime.PITCH_TEXT
         save_path = runtime.os.path.join(
             self.main_export_path,

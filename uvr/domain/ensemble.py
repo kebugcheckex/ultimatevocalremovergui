@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,39 +14,50 @@ def configure_runtime(module: Any) -> None:
     runtime = module
 
 
+@dataclass(frozen=True)
+class EnsemblerSettings:
+    is_save_all_outputs_ensemble: bool
+    chosen_ensemble_name: str
+    ensemble_type: str
+    ensemble_main_stem_pair: tuple[str, str]
+    export_path: str
+    is_append_ensemble_name: bool
+    is_testing_audio: bool
+    is_normalization: bool
+    is_wav_ensemble: bool
+    wav_type_set: Any
+    mp3_bit_set: str
+    save_format: str
+    choose_algorithm: str
+
+
 class Ensembler:
-    def __init__(self, is_manual_ensemble: bool = False):
-        self.is_save_all_outputs_ensemble = runtime.root.is_save_all_outputs_ensemble_var.get()
-        chosen_ensemble_name = (
-            f"{runtime.root.chosen_ensemble_var.get().replace(' ', '_')}"
-            if runtime.root.chosen_ensemble_var.get() != runtime.CHOOSE_ENSEMBLE_OPTION
-            else "Ensembled"
-        )
-        ensemble_algorithm = runtime.root.ensemble_type_var.get().partition("/")
-        ensemble_main_stem_pair = runtime.root.ensemble_main_stem_var.get().partition("/")
+    def __init__(self, settings: EnsemblerSettings, is_manual_ensemble: bool = False):
+        self.is_save_all_outputs_ensemble = settings.is_save_all_outputs_ensemble
         time_stamp = round(runtime.time.time())
         self.audio_tool = runtime.MANUAL_ENSEMBLE
-        self.main_export_path = Path(runtime.root.export_path_var.get())
-        self.chosen_ensemble = (
-            f"_{chosen_ensemble_name}" if runtime.root.is_append_ensemble_name_var.get() else ""
-        )
+        self.main_export_path = Path(settings.export_path)
+        self.chosen_ensemble = f"_{settings.chosen_ensemble_name}" if settings.is_append_ensemble_name else ""
         ensemble_folder_name = (
             self.main_export_path if self.is_save_all_outputs_ensemble else runtime.ENSEMBLE_TEMP_PATH
         )
         self.ensemble_folder_name = runtime.os.path.join(
             ensemble_folder_name,
-            f"{chosen_ensemble_name}_Outputs_{time_stamp}",
+            f"{settings.chosen_ensemble_name}_Outputs_{time_stamp}",
         )
-        self.is_testing_audio = f"{time_stamp}_" if runtime.root.is_testing_audio_var.get() else ""
+        self.is_testing_audio = f"{time_stamp}_" if settings.is_testing_audio else ""
+        ensemble_algorithm = settings.ensemble_type.partition("/")
         self.primary_algorithm = ensemble_algorithm[0]
         self.secondary_algorithm = ensemble_algorithm[2]
-        self.ensemble_primary_stem = ensemble_main_stem_pair[0]
-        self.ensemble_secondary_stem = ensemble_main_stem_pair[2]
-        self.is_normalization = runtime.root.is_normalization_var.get()
-        self.is_wav_ensemble = runtime.root.is_wav_ensemble_var.get()
-        self.wav_type_set = runtime.root.wav_type_set
-        self.mp3_bit_set = runtime.root.mp3_bit_set_var.get()
-        self.save_format = runtime.root.save_format_var.get()
+        self.full_ensemble_algorithm = settings.ensemble_type
+        self.ensemble_primary_stem = settings.ensemble_main_stem_pair[0]
+        self.ensemble_secondary_stem = settings.ensemble_main_stem_pair[1]
+        self.is_normalization = settings.is_normalization
+        self.is_wav_ensemble = settings.is_wav_ensemble
+        self.wav_type_set = settings.wav_type_set
+        self.mp3_bit_set = settings.mp3_bit_set
+        self.save_format = settings.save_format
+        self.choose_algorithm = settings.choose_algorithm
         if not is_manual_ensemble:
             runtime.os.mkdir(self.ensemble_folder_name)
 
@@ -58,7 +70,7 @@ class Ensembler:
         is_inst_mix: bool = False,
     ) -> None:
         if is_4_stem:
-            algorithm = runtime.root.ensemble_type_var.get()
+            algorithm = self.full_ensemble_algorithm
             stem_tag = stem
         else:
             if is_inst_mix:
@@ -125,8 +137,8 @@ class Ensembler:
         audio_file_base: str,
         is_bulk: bool,
     ) -> None:
-        algorithm = runtime.root.choose_algorithm_var.get()
-        algorithm_text = "" if is_bulk else f"_({runtime.root.choose_algorithm_var.get()})"
+        algorithm = self.choose_algorithm
+        algorithm_text = "" if is_bulk else f"_({self.choose_algorithm})"
         stem_save_path = runtime.os.path.join(
             f"{self.main_export_path}",
             f"{self.is_testing_audio}{audio_file_base}{algorithm_text}.wav",
@@ -152,8 +164,8 @@ class Ensembler:
         save_format_ = (
             lambda save_path: runtime.save_format(
                 save_path,
-                runtime.root.save_format_var.get(),
-                runtime.root.mp3_bit_set_var.get(),
+                self.save_format,
+                self.mp3_bit_set,
             )
         )
         runtime.spec_utils.combine_audio(
