@@ -1,0 +1,2 @@
+# Minimal dependencies for the in-progress PySide6 frontend.
+PySide6>=6.6,<7
