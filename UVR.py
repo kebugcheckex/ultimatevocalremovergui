@@ -69,6 +69,8 @@ from uvr.domain import model_data as model_data_module
 from uvr.services import processing as processing_service_module
 from uvr.ui import actions as ui_actions_module
 from uvr.ui import file_inputs as ui_file_inputs_module
+from uvr.ui.menus import common as common_menus_module
+from uvr.ui.menus import inputs as input_menus_module
 from uvr.ui import widgets as widgets_module
 from uvr.utils import system as system_helpers
 from uvr.utils import tk_helpers as tk_helpers_module
@@ -1764,6 +1766,12 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     def file_inputs(self):
         return ui_file_inputs_module.MainWindowFileInputs(self)
 
+    def input_menus(self):
+        return input_menus_module.InputMenus(self)
+
+    def menu_helpers(self):
+        return common_menus_module.MenuHelpers(self)
+
     def ui_actions(self):
         return ui_actions_module.MainWindowActions(self)
     
@@ -2500,29 +2508,10 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
             self.error_log_var.set("{}".format(error_text(menu, e)))
 
     def input_right_click_menu(self, event):
-
-        right_click_menu = tk.Menu(self, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=0)
-        right_click_menu.add_command(label='See All Inputs', command=lambda:self.check_is_menu_open(INPUTS_MENU))
-        
-        try:
-            right_click_menu.tk_popup(event.x_root,event.y_root)
-            right_click_release_linux(right_click_menu)
-        finally:
-            right_click_menu.grab_release()
+        self.input_menus().input_right_click_menu(event)
 
     def input_dual_right_click_menu(self, event, is_primary:bool):
-        input_path = self.fileOneEntry_Full_var.get() if is_primary else self.fileTwoEntry_Full_var.get()
-        right_click_menu = tk.Menu(self, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=0)
-        right_click_menu.add_command(label=CHOOSE_INPUT_TEXT, command=lambda:self.select_audiofile(is_primary=is_primary))
-        if input_path and os.path.isdir(os.path.dirname(input_path)):
-            right_click_menu.add_command(label=OPEN_INPUT_DIR_TEXT, command=lambda:OPEN_FILE_func(os.path.dirname(input_path)))
-        right_click_menu.add_command(label=BATCH_PROCESS_MENU_TEXT, command=self.menu_batch_dual)
-        
-        try:
-            right_click_menu.tk_popup(event.x_root,event.y_root)
-            right_click_release_linux(right_click_menu)
-        finally:
-            right_click_menu.grab_release()
+        self.input_menus().input_dual_right_click_menu(event, is_primary=is_primary)
 
     def cached_sources_clear(self):
 
@@ -2763,8 +2752,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     #--Secondary Window Methods--
 
     def vocal_splitter_Button_opt(self, top_window, frame, pady, width=15):
-        vocal_splitter_Button = ttk.Button(frame, text=VOCAL_SPLITTER_OPTIONS_TEXT, command=lambda:self.pop_up_set_vocal_splitter(top_window), width=width)#
-        vocal_splitter_Button.grid(pady=pady)
+        self.menu_helpers().vocal_splitter_button_opt(top_window, frame, pady, width)
 
     def adjust_toplevel_positions(self, event):
         # Copy the list to avoid modifying while iterating
@@ -2779,469 +2767,36 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
     def menu_placement(self, window: tk.Toplevel, title, pop_up=False, is_help_hints=False, close_function=None, frame_list=None, top_window=None):
         """Prepares and centers each secondary window relative to the main window"""
-        
-        top_window = top_window if top_window else root
-        window.withdraw()
-        window.resizable(False, False)
-        window.wm_transient(top_window)
-        window.title(title)
-        window.iconbitmap(ICON_IMG_PATH) if is_windows else self.tk.call('wm', 'iconphoto', window._w, tk.PhotoImage(file=MAIN_ICON_IMG_PATH))
-        
-        root_location_x = root.winfo_x()
-        root_location_y = root.winfo_y()
-        root_x = root.winfo_width() 
-        root_y = root.winfo_height()
-        window.update() if is_windows else window.update_idletasks()
-        sub_menu_x = window.winfo_reqwidth() 
-        sub_menu_y = window.winfo_reqheight()
-        menu_offset_x = (root_x - sub_menu_x) // 2
-        menu_offset_y = (root_y - sub_menu_y) // 2
-        window.geometry("+%d+%d" %(root_location_x+menu_offset_x, root_location_y+menu_offset_y))
-        
-        window.deiconify()
-        window.configure(bg=BG_COLOR)
-
-        if not is_macos:
-            self.toplevels.append(window)
-        
-        def right_click_menu(event):
-            help_hints_label = 'Enable' if self.help_hints_var.get() == False else 'Disable'
-            help_hints_bool = True if self.help_hints_var.get() == False else False
-            right_click_menu = tk.Menu(self, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=0)
-            if is_help_hints:
-                right_click_menu.add_command(label=f'{help_hints_label} Help Hints', command=lambda:self.help_hints_var.set(help_hints_bool))
-            right_click_menu.add_command(label='Exit Window', command=close_function)
-            
-            try:
-                right_click_menu.tk_popup(event.x_root,event.y_root)
-                right_click_release_linux(right_click_menu, window)
-            finally:
-                right_click_menu.grab_release()
-        
-        if close_function:
-            window.bind(right_click_button, lambda e:right_click_menu(e))
-
-        if frame_list:
-            for frame in frame_list:
-                #self.adjust_widget_widths(frame)
-                self.focus_out_widgets(frame.winfo_children() + [frame], frame)
- 
-        if pop_up:
-            window.attributes('-topmost', 'true') if OPERATING_SYSTEM == "Linux" else None
-            window.grab_set()
-            root.wait_window(window)
+        self.menu_helpers().menu_placement(
+            window,
+            title,
+            pop_up=pop_up,
+            is_help_hints=is_help_hints,
+            close_function=close_function,
+            frame_list=frame_list,
+            top_window=top_window,
+        )
             
     def adjust_widget_widths(self, frame):
-
-        def resize_widget(widgets):
-            max_width = max(wid.winfo_width() for wid in widgets)
-            for wid in widgets:
-                if isinstance(wid, (tk.Button, ttk.Combobox)):
-                    # For widgets where width represents characters, not pixels
-                    wid.configure(width=int(max_width / wid.winfo_pixels('1c')))
-                else:
-                    # For widgets where width represents pixels
-                    wid.configure(width=max_width)
-
-        resize_widget([widget for widget in frame.winfo_children() if isinstance(widget, tk.Button)])
-        resize_widget([widget for widget in frame.winfo_children() if isinstance(widget, ttk.Combobox)])
+        self.menu_helpers().adjust_widget_widths(frame)
 
     def menu_move_tab(notebook: ttk.Notebook, tab_text, new_position):
-        # Get the tab ID
-        tab_id = None
-        for tab in notebook.tabs():
-            if notebook.tab(tab, "text") == tab_text:
-                tab_id = tab
-                break
-
-        if tab_id is None:
-            print(f"No tab named '{tab_text}'")
-            return
-
-        # remove the tab
-        notebook.forget(tab_id)
-        
-        # add it back in new position
-        notebook.insert(new_position, tab_id)
+        common_menus_module.MenuHelpers(None).menu_move_tab(notebook, tab_text, new_position)
           
     def menu_tab_control(self, toplevel, ai_network_vars, is_demucs=False, is_mdxnet=False):
         """Prepares the tabs setup for some windows"""
-
-        tabControl = ttk.Notebook(toplevel)
-
-        tab1 = ttk.Frame(tabControl)
-        tab2 = ttk.Frame(tabControl)
-
-        tabControl.add(tab1, text=SETTINGS_GUIDE_TEXT)
-        tabControl.add(tab2, text=SECONDARY_MODEL_TEXT)
-
-        tab1.grid_rowconfigure(0, weight=1)
-        tab1.grid_columnconfigure(0, weight=1)
-
-        tab2.grid_rowconfigure(0, weight=1)
-        tab2.grid_columnconfigure(0, weight=1)
-
-        if is_demucs or is_mdxnet:
-            tab3 = ttk.Frame(tabControl)
-            tabControl.add(tab3, text=PREPROCESS_MODEL_CHOOSE_TEXT if is_demucs else MDX23C_ONLY_OPTIONS_TEXT)
-            tab3.grid_rowconfigure(0, weight=1)
-            tab3.grid_columnconfigure(0, weight=1)
-
-        tabControl.pack(expand=1, fill=tk.BOTH)
-        
-        self.tab2_loaded = False
-        self.tab3_loaded = False
-
-        def on_tab_selected(event):
-            # Check if it's tab2 (by tab id or tab title) and if it hasn't been loaded before
-            load_screen = False
-            if event.widget.tab('current', option='text') == 'Secondary Model' and not self.tab2_loaded:
-                tab = tab2
-                self.tab2_loaded = True
-                tab_load = lambda:self.menu_secondary_model(tab, ai_network_vars)
-                load_screen = True
-            elif event.widget.tab('current', option='text') == PREPROCESS_MODEL_CHOOSE_TEXT and not self.tab3_loaded:
-                tab = tab3
-                self.tab3_loaded = True
-                tab_load = lambda:self.menu_preproc_model(tab)
-                load_screen = True
-                
-            if load_screen:
-                # Step 1: Add "Loading..." label
-                loading_label = ttk.Label(tab, text="Updating model lists...", font=Font(family=MAIN_FONT_NAME, size=14))
-                loading_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)  # Assuming you want to center it
-                
-                # Step 2: Update the UI to show the label
-                tab.update_idletasks()
-
-                # Load the content
-                tab_load()
-                
-                # Step 3: Remove or update the "Loading..." label
-                loading_label.destroy()  # Remove the label. Or you can update its text if desired.
-                
-            #self.on_tab_changed(tabControl)
-
-        tabControl.bind("<<NotebookTabChanged>>", on_tab_selected)
-
-        if is_demucs or is_mdxnet:
-            return tab1, tab3
-        else:
-            return tab1
+        return self.menu_helpers().menu_tab_control(
+            toplevel,
+            ai_network_vars,
+            is_demucs=is_demucs,
+            is_mdxnet=is_mdxnet,
+        )
 
     def menu_view_inputs(self):
-                     
-        menu_view_inputs_top = tk.Toplevel(root)
-    
-        self.is_open_menu_view_inputs.set(True)
-        self.menu_view_inputs_close_window = lambda:close_window()
-        menu_view_inputs_top.protocol("WM_DELETE_WINDOW", self.menu_view_inputs_close_window)
-    
-        input_length_var = tk.StringVar(value='')   
-        input_info_text_var = tk.StringVar(value='')  
-        is_widen_box_var = tk.BooleanVar(value=False) 
-        is_play_file_var = tk.BooleanVar(value=False) 
-        varification_text_var = tk.StringVar(value=VERIFY_INPUTS_TEXT)
-
-        reset_list = lambda:(input_files_listbox_Option.delete(0, 'end'), [input_files_listbox_Option.insert(tk.END, inputs) for inputs in self.inputPaths])
-        audio_input_total = lambda:input_length_var.set(f'{AUDIO_INPUT_TOTAL_TEXT}: {len(self.inputPaths)}')
-        audio_input_total()
-
-        def list_diff(list1, list2): return list(set(list1).symmetric_difference(set(list2)))
-
-        def list_to_string(list1): return '\n'.join(''.join(sub) for sub in list1)
-
-        def close_window():
-            self.verification_thread.kill() if self.thread_check(self.verification_thread) else None
-            self.is_open_menu_view_inputs.set(False)
-            menu_view_inputs_top.destroy()
-
-        def drag_n_drop(e):
-            input_info_text_var.set('')
-            drop(e, accept_mode='files')
-            reset_list()
-            audio_input_total()
-            
-        def selected_files(is_remove=False):
-            if not self.thread_check(self.active_processing_thread):
-                items_list = [input_files_listbox_Option.get(i) for i in input_files_listbox_Option.curselection()]
-                inputPaths = list(self.inputPaths)# if is_remove else items_list
-                if is_remove:
-                    [inputPaths.remove(i) for i in items_list if items_list]
-                else:
-                    [inputPaths.remove(i) for i in self.inputPaths if i not in items_list]
-                removed_files = list_diff(self.inputPaths, inputPaths)
-                [input_files_listbox_Option.delete(input_files_listbox_Option.get(0, tk.END).index(i)) for i in removed_files]
-                starting_len = len(self.inputPaths)
-                self.inputPaths = tuple(inputPaths)
-                self.update_inputPaths()
-                audio_input_total()
-                input_info_text_var.set(f'{starting_len - len(self.inputPaths)} input(s) removed.')
-            else:
-                input_info_text_var.set('You cannot remove inputs during an active process.')
-            
-        def box_size():
-            input_info_text_var.set('')
-            input_files_listbox_Option.config(width=230, height=25) if is_widen_box_var.get() else input_files_listbox_Option.config(width=110, height=17)
-            self.menu_placement(menu_view_inputs_top, 'Selected Inputs', pop_up=True)
-
-        def input_options(is_select_inputs=True):
-            input_info_text_var.set('')
-            if is_select_inputs:
-                self.input_select_filedialog()
-            else:
-                self.inputPaths = ()
-            reset_list()
-            self.update_inputPaths()
-            audio_input_total()
-
-        def pop_open_file_path(is_play_file=False):
-            if self.inputPaths:
-                track_selected = self.inputPaths[input_files_listbox_Option.index(tk.ACTIVE)]
-                if os.path.isfile(track_selected):
-                    OPEN_FILE_func(track_selected if is_play_file else os.path.dirname(track_selected))
-        
-        def get_export_dir():
-            if os.path.isdir(self.export_path_var.get()):
-                export_dir = self.export_path_var.get()
-            else:
-                export_dir = self.export_select_filedialog()
-
-            return export_dir
-        
-        def verify_audio(is_create_samples=False):
-            inputPaths = list(self.inputPaths)
-            iterated_list = self.inputPaths if not is_create_samples else [input_files_listbox_Option.get(i) for i in input_files_listbox_Option.curselection()]
-            removed_files = []
-            export_dir = None
-            total_audio_count, current_file = len(iterated_list), 0
-            if iterated_list:
-                for i in iterated_list:
-                    current_file += 1
-                    input_info_text_var.set(f'{SAMPLE_BEGIN if is_create_samples else VERIFY_BEGIN}{current_file}/{total_audio_count}')
-                    if is_create_samples:
-                        export_dir = get_export_dir()
-                        if not export_dir:
-                            input_info_text_var.set(f'No export directory selected.')
-                            return
-                    is_good, error_data = self.verify_audio(i, is_process=False, sample_path=export_dir)
-                    if not is_good:
-                        inputPaths.remove(i)
-                        removed_files.append(error_data)#sample = self.create_sample(i)
-                        
-                varification_text_var.set(VERIFY_INPUTS_TEXT)
-                input_files_listbox_Option.configure(state=tk.NORMAL)
-                
-                if removed_files:
-                    input_info_text_var.set(f'{len(removed_files)} {BROKEN_OR_INCOM_TEXT}')
-                    error_text = ''
-                    for i in removed_files:
-                        error_text += i
-                    removed_files = list_diff(self.inputPaths, inputPaths)
-                    [input_files_listbox_Option.delete(input_files_listbox_Option.get(0, tk.END).index(i)) for i in removed_files]
-                    self.error_log_var.set(REMOVED_FILES(list_to_string(removed_files), error_text))
-                    self.inputPaths = tuple(inputPaths)
-                    self.update_inputPaths()
-                else:
-                    input_info_text_var.set(f'No errors found!')
-                    
-                audio_input_total()
-            else:
-                input_info_text_var.set(f'{NO_FILES_TEXT} {SELECTED_VER if is_create_samples else DETECTED_VER}')
-                varification_text_var.set(VERIFY_INPUTS_TEXT)
-                input_files_listbox_Option.configure(state=tk.NORMAL)
-                return
-            
-            audio_input_total()
-            
-        def verify_audio_start_thread(is_create_samples=False):
-            
-            if not self.thread_check(self.active_processing_thread):
-                if not self.thread_check(self.verification_thread):
-                    varification_text_var.set('Stop Progress')
-                    input_files_listbox_Option.configure(state=tk.DISABLED)
-                    self.verification_thread = KThread(target=lambda:verify_audio(is_create_samples=is_create_samples))
-                    self.verification_thread.start()
-                else:
-                    input_files_listbox_Option.configure(state=tk.NORMAL)
-                    varification_text_var.set(VERIFY_INPUTS_TEXT)
-                    input_info_text_var.set('Process Stopped')
-                    self.verification_thread.kill()
-            else:
-                input_info_text_var.set('You cannot verify inputs during an active process.')
-
-        def right_click_menu(event):
-                right_click_menu = tk.Menu(self, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=0)
-                right_click_menu.add_command(label='Remove Selected Items Only', command=lambda:selected_files(is_remove=True))
-                right_click_menu.add_command(label='Keep Selected Items Only', command=lambda:selected_files(is_remove=False))
-                right_click_menu.add_command(label='Clear All Input(s)', command=lambda:input_options(is_select_inputs=False))
-                right_click_menu.add_separator()
-                right_click_menu_sub = tk.Menu(right_click_menu, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=False)
-                right_click_menu.add_command(label='Verify and Create Samples of Selected Inputs', command=lambda:verify_audio_start_thread(is_create_samples=True))
-                right_click_menu.add_cascade(label='Preferred Double Click Action', menu=right_click_menu_sub)
-                if is_play_file_var.get():
-                    right_click_menu_sub.add_command(label='Enable: Open Audio File Directory', command=lambda:(input_files_listbox_Option.bind('<Double-Button>', lambda e:pop_open_file_path()), is_play_file_var.set(False)))
-                else:
-                    right_click_menu_sub.add_command(label='Enable: Open Audio File', command=lambda:(input_files_listbox_Option.bind('<Double-Button>', lambda e:pop_open_file_path(is_play_file=True)), is_play_file_var.set(True)))
-
-                try:
-                    right_click_menu.tk_popup(event.x_root,event.y_root)
-                    right_click_release_linux(right_click_menu, menu_view_inputs_top)
-                finally:
-                    right_click_menu.grab_release()
-
-        menu_view_inputs_Frame = self.menu_FRAME_SET(menu_view_inputs_top)
-        menu_view_inputs_Frame.grid(row=0)  
-
-        self.main_window_LABEL_SET(menu_view_inputs_Frame, SELECTED_INPUTS).grid(row=0,column=0,padx=0,pady=MENU_PADDING_1)
-        tk.Label(menu_view_inputs_Frame, textvariable=input_length_var, font=(MAIN_FONT_NAME, f"{FONT_SIZE_1}"), foreground=FG_COLOR).grid(row=1, column=0, padx=0, pady=MENU_PADDING_1)
-        if not OPERATING_SYSTEM == "Linux":
-            ttk.Button(menu_view_inputs_Frame, text=SELECT_INPUTS, command=lambda:input_options()).grid(row=2,column=0,padx=0,pady=MENU_PADDING_2)
-        input_files_listbox_Option = tk.Listbox(menu_view_inputs_Frame, selectmode=tk.EXTENDED, activestyle='dotbox', font=(MAIN_FONT_NAME, f"{FONT_SIZE_1}"), background='#101414', exportselection=0, width=110, height=17, relief=tk.SOLID, borderwidth=0)
-        input_files_listbox_vertical_scroll = ttk.Scrollbar(menu_view_inputs_Frame, orient=tk.VERTICAL)
-        input_files_listbox_Option.config(yscrollcommand=input_files_listbox_vertical_scroll.set)
-        input_files_listbox_vertical_scroll.configure(command=input_files_listbox_Option.yview)
-        input_files_listbox_Option.grid(row=4, sticky=tk.W)
-        input_files_listbox_vertical_scroll.grid(row=4, column=1, sticky=tk.NS)
-
-        tk.Label(menu_view_inputs_Frame, textvariable=input_info_text_var, font=(MAIN_FONT_NAME, f"{FONT_SIZE_1}"), foreground=FG_COLOR).grid(row=5, column=0, padx=0, pady=0)
-        ttk.Checkbutton(menu_view_inputs_Frame, text=WIDEN_BOX, variable=is_widen_box_var, command=lambda:box_size()).grid(row=6,column=0,padx=0,pady=0)
-        verify_audio_Button = ttk.Button(menu_view_inputs_Frame, textvariable=varification_text_var, command=lambda:verify_audio_start_thread())
-        verify_audio_Button.grid(row=7,column=0,padx=0,pady=MENU_PADDING_1)
-        ttk.Button(menu_view_inputs_Frame, text=CLOSE_WINDOW, command=lambda:menu_view_inputs_top.destroy()).grid(row=8,column=0,padx=0,pady=MENU_PADDING_1)
-
-        if is_dnd_compatible:
-            menu_view_inputs_top.drop_target_register(DND_FILES)
-            menu_view_inputs_top.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e))
-        input_files_listbox_Option.bind(right_click_button, lambda e:right_click_menu(e))
-        input_files_listbox_Option.bind('<Double-Button>', lambda e:pop_open_file_path())
-        input_files_listbox_Option.bind('<Delete>', lambda e:selected_files(is_remove=True))
-        input_files_listbox_Option.bind('<BackSpace>', lambda e:selected_files(is_remove=False))
-
-        reset_list()
-
-        self.menu_placement(menu_view_inputs_top, 'Selected Inputs', pop_up=True)
+        self.input_menus().menu_view_inputs()
 
     def menu_batch_dual(self):
-        menu_batch_dual_top = tk.Toplevel(root)
-        
-        def drag_n_drop(event, accept_mode):
-            listbox = left_frame if accept_mode == FILE_1_LB else right_frame
-            paths = drop(event, accept_mode)
-            for item in paths:
-                if item not in listbox.path_list:  # only add file if it's not already in the list
-                    basename = os.path.basename(item)
-                    listbox.listbox.insert(tk.END, basename)  # insert basename to the listbox
-                    listbox.path_list.append(item)  # append the file path to the list
-            listbox.update_displayed_index()
-        
-        def move_entry(is_primary=True):
-            if is_primary:
-                selected_frame, other_frame = left_frame, right_frame
-            else:
-                selected_frame, other_frame = right_frame, left_frame
-
-            selected = selected_frame.listbox.curselection()
-
-            if selected:
-                basename = selected_frame.listbox.get(selected[0]).split(': ', 1)[1]  # remove displayed index
-
-                if basename in other_frame.basename_to_path:
-                    return
-
-                path = selected_frame.basename_to_path[basename]  # Get the actual path
-
-                selected_frame.listbox.delete(selected)
-                other_frame.listbox.insert(tk.END, basename)
-
-                selected_frame.path_list.remove(path)
-                del selected_frame.basename_to_path[basename]
-
-                other_frame.path_list.append(path)
-                other_frame.basename_to_path[basename] = path
-
-                selected_frame.update_displayed_index()
-                other_frame.update_displayed_index()
-        
-        def open_selected_path(lb, is_play_file=False):
-            selected_frame = left_frame if lb == FILE_1_LB else right_frame
-            selected_path = selected_frame.get_selected_path()
-            
-            if selected_path:
-                if os.path.isfile(selected_path):
-                    OPEN_FILE_func(selected_path if is_play_file else os.path.dirname(selected_path))
-
-        def clear_all_data(lb):
-            selected_frame = left_frame if lb == FILE_1_LB else right_frame
-            selected_frame.listbox.delete(0, "end")
-            selected_frame.path_list.clear()
-            selected_frame.basename_to_path.clear()
-        
-        def clear_all(event, lb):
-            selected_frame = left_frame if lb == FILE_1_LB else right_frame
-            selected = selected_frame.listbox.curselection()
-            
-            right_click_menu = tk.Menu(self, font=(MAIN_FONT_NAME, FONT_SIZE_1), tearoff=0)
-            if selected:
-                right_click_menu.add_command(label='Open Location', command=lambda:open_selected_path(lb))
-                right_click_menu.add_command(label='Open File', command=lambda:open_selected_path(lb, is_play_file=True))
-            right_click_menu.add_command(label='Clear All', command=lambda:clear_all_data(lb))
-
-            try:
-                right_click_menu.tk_popup(event.x_root,event.y_root)
-                right_click_release_linux(right_click_menu, menu_batch_dual_top)
-            finally:
-                right_click_menu.grab_release()
-       
-        def gather_input_list():
-            left_paths = list(left_frame.basename_to_path.values())
-            right_paths = list(right_frame.basename_to_path.values())
-            
-            clear_all_data(FILE_1_LB)
-            clear_all_data(FILE_2_LB)
-            
-            if left_paths and right_paths:
-                left_frame.select_input(left_paths)
-                right_frame.select_input(right_paths)
-
-            self.DualBatch_inputPaths = list(zip(left_paths, right_paths))
-            self.check_dual_paths()
-            menu_batch_dual_top.destroy()
-
-        menu_view_inputs_Frame = self.menu_FRAME_SET(menu_batch_dual_top)
-        menu_view_inputs_Frame.grid(row=0)
-        
-        left_frame = ListboxBatchFrame(menu_view_inputs_Frame, self.file_one_sub_var.get().title(), move_entry, self.right_img, self.img_mapper)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        
-        right_frame = ListboxBatchFrame(menu_view_inputs_Frame, self.file_two_sub_var.get().title(), lambda:move_entry(False), self.left_img, self.img_mapper)
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        if is_dnd_compatible:
-            left_frame.listbox.drop_target_register(DND_FILES)
-            right_frame.listbox.drop_target_register(DND_FILES)
-            left_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_1_LB))
-            right_frame.listbox.dnd_bind('<<Drop>>', lambda e: drag_n_drop(e, FILE_2_LB))
-        left_frame.listbox.bind(right_click_button, lambda e: clear_all(e, FILE_1_LB))
-        right_frame.listbox.bind(right_click_button, lambda e: clear_all(e, FILE_2_LB))
-
-        menu_view_inputs_bottom_Frame = self.menu_FRAME_SET(menu_batch_dual_top)
-        menu_view_inputs_bottom_Frame.grid(row=1)
-        
-        confirm_btn = ttk.Button(menu_view_inputs_bottom_Frame, text=CONFIRM_ENTRIES, command=gather_input_list)
-        confirm_btn.grid(pady=MENU_PADDING_1)
-        
-        close_btn = ttk.Button(menu_view_inputs_bottom_Frame, text=CLOSE_WINDOW, command=lambda:menu_batch_dual_top.destroy())
-        close_btn.grid(pady=MENU_PADDING_1)
-
-        if self.check_dual_paths():
-            left_frame_pane = [i[0] for i in self.DualBatch_inputPaths]
-            right_frame_pane = [i[1] for i in self.DualBatch_inputPaths]
-            left_frame.update_displayed_index(left_frame_pane)
-            right_frame.update_displayed_index(right_frame_pane)
-            self.check_dual_paths()
-
-        self.menu_placement(menu_batch_dual_top, DUAL_AUDIO_PROCESSING, pop_up=True)
+        self.input_menus().menu_batch_dual()
 
     def check_dual_paths(self, is_fill_menu=False):
         return self.file_inputs().check_dual_paths(is_fill_menu=is_fill_menu)
@@ -6486,6 +6041,8 @@ model_data_module.configure_runtime(sys.modules[__name__])
 processing_service_module.configure_runtime(sys.modules[__name__])
 ui_actions_module.configure_runtime(sys.modules[__name__])
 ui_file_inputs_module.configure_runtime(sys.modules[__name__])
+common_menus_module.configure_runtime(sys.modules[__name__])
+input_menus_module.configure_runtime(sys.modules[__name__])
 ensemble_module.configure_runtime(sys.modules[__name__])
 audio_tools_module.configure_runtime(sys.modules[__name__])
 widgets_module.configure_runtime(sys.modules[__name__])
