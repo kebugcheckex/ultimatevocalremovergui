@@ -61,6 +61,7 @@ from uvr.config.models import AppSettings
 from uvr.config import persistence as persistence_helpers
 from uvr.domain import audio_tools as audio_tools_module
 from uvr.domain import ensemble as ensemble_module
+from uvr.domain import model_data as model_data_module
 from uvr.ui import widgets as widgets_module
 from uvr.utils import system as system_helpers
 from uvr.utils import tk_helpers as tk_helpers_module
@@ -275,6 +276,103 @@ data = persistence_helpers.load_settings(DEFAULT_DATA).to_legacy_dict()
 def normalize_app_settings_dict(data: dict | None) -> dict:
     """Normalize legacy settings dicts against the current defaults."""
     return AppSettings.from_legacy_dict(data, DEFAULT_DATA).to_legacy_dict()
+
+
+def build_model_data_settings() -> model_data_module.ModelDataSettings:
+    device_set = root.device_set_var.get()
+    return model_data_module.ModelDataSettings(
+        device_set=device_set,
+        is_deverb_vocals=root.is_deverb_vocals_var.get(),
+        deverb_vocal_opt=DEVERB_MAPPER[root.deverb_vocal_opt_var.get()],
+        is_denoise_model=root.denoise_option_var.get() == DENOISE_M,
+        is_gpu_conversion=root.is_gpu_conversion_var.get(),
+        is_normalization=root.is_normalization_var.get(),
+        is_use_opencl=False,
+        is_primary_stem_only=root.is_primary_stem_only_var.get(),
+        is_secondary_stem_only=root.is_secondary_stem_only_var.get(),
+        is_primary_stem_only_demucs=root.is_primary_stem_only_Demucs_var.get(),
+        is_secondary_stem_only_demucs=root.is_secondary_stem_only_Demucs_var.get(),
+        denoise_option=root.denoise_option_var.get(),
+        is_mdx_c_seg_def=root.is_mdx_c_seg_def_var.get(),
+        mdx_batch_size=root.mdx_batch_size_var.get(),
+        mdxnet_stems=root.mdxnet_stems_var.get(),
+        overlap=root.overlap_var.get(),
+        overlap_mdx=root.overlap_mdx_var.get(),
+        overlap_mdx23=root.overlap_mdx23_var.get(),
+        semitone_shift=root.semitone_shift_var.get(),
+        is_match_frequency_pitch=root.is_match_frequency_pitch_var.get(),
+        is_mdx23_combine_stems=root.is_mdx23_combine_stems_var.get(),
+        wav_type_set=root.wav_type_set,
+        mp3_bit_set=root.mp3_bit_set_var.get(),
+        save_format=root.save_format_var.get(),
+        is_invert_spec=root.is_invert_spec_var.get(),
+        demucs_stems=root.demucs_stems_var.get(),
+        is_demucs_combine_stems=root.is_demucs_combine_stems_var.get(),
+        chosen_process_method=root.chosen_process_method_var.get(),
+        is_save_inst_set_vocal_splitter=root.is_save_inst_set_vocal_splitter_var.get(),
+        ensemble_main_stem=root.ensemble_main_stem_var.get(),
+        vr_is_secondary_model_activate=root.vr_is_secondary_model_activate_var.get(),
+        aggression_setting=root.aggression_setting_var.get(),
+        is_tta=root.is_tta_var.get(),
+        is_post_process=root.is_post_process_var.get(),
+        window_size=root.window_size_var.get(),
+        batch_size=root.batch_size_var.get(),
+        crop_size=root.crop_size_var.get(),
+        is_high_end_process=root.is_high_end_process_var.get(),
+        post_process_threshold=root.post_process_threshold_var.get(),
+        vr_hash_mapper=root.vr_hash_MAPPER,
+        mdx_is_secondary_model_activate=root.mdx_is_secondary_model_activate_var.get(),
+        margin=root.margin_var.get(),
+        mdx_segment_size=root.mdx_segment_size_var.get(),
+        mdx_hash_mapper=root.mdx_hash_MAPPER,
+        compensate=root.compensate_var.get(),
+        demucs_is_secondary_model_activate=root.demucs_is_secondary_model_activate_var.get(),
+        is_demucs_pre_proc_model_activate=root.is_demucs_pre_proc_model_activate_var.get(),
+        is_demucs_pre_proc_model_inst_mix=root.is_demucs_pre_proc_model_inst_mix_var.get(),
+        margin_demucs=root.margin_demucs_var.get(),
+        shifts=root.shifts_var.get(),
+        is_split_mode=root.is_split_mode_var.get(),
+        segment=root.segment_var.get(),
+        is_chunk_demucs=root.is_chunk_demucs_var.get(),
+        mdx_name_select_mapper=root.mdx_name_select_MAPPER,
+        demucs_name_select_mapper=root.demucs_name_select_MAPPER,
+    )
+
+
+def resolve_model_data_popup(
+    process_method: str,
+    model_name: str,
+    model_hash: str,
+    model_path: str,
+    is_change_def: bool,
+):
+    if not is_change_def:
+        confirm = messagebox.askyesno(
+            title=UNRECOGNIZED_MODEL[0],
+            message=f'"{model_name}"{UNRECOGNIZED_MODEL[1]}',
+            parent=root,
+        )
+        if not confirm:
+            return None
+
+    if process_method == VR_ARCH_TYPE:
+        root.pop_up_vr_param(model_hash)
+        return root.vr_model_params
+    if process_method == MDX_ARCH_TYPE:
+        root.pop_up_mdx_model(model_hash, model_path)
+        return root.mdx_model_params
+    return None
+
+
+def build_model_data_resolvers() -> model_data_module.ModelDataResolvers:
+    return model_data_module.ModelDataResolvers(
+        return_ensemble_stems=root.return_ensemble_stems,
+        check_only_selection_stem=root.check_only_selection_stem,
+        determine_secondary_model=root.process_determine_secondary_model,
+        determine_demucs_pre_proc_model=root.process_determine_demucs_pre_proc_model,
+        determine_vocal_split_model=root.process_determine_vocal_split_model,
+        resolve_popup_model_data=resolve_model_data_popup,
+    )
 
 def drop(event, accept_mode: str = 'files'):
     path = event.data
@@ -733,6 +831,34 @@ class ModelData():
                 model_hash_table.update(table_entry)
                 
         #print(self.model_name," - ", self.model_hash)
+
+class ModelData(model_data_module.ModelData):
+    def __init__(self, model_name: str,
+                 selected_process_method=ENSEMBLE_MODE,
+                 is_secondary_model=False,
+                 primary_model_primary_stem=None,
+                 is_primary_model_primary_stem_only=False,
+                 is_primary_model_secondary_stem_only=False,
+                 is_pre_proc_model=False,
+                 is_dry_check=False,
+                 is_change_def=False,
+                 is_get_hash_dir_only=False,
+                 is_vocal_split_model=False):
+        super().__init__(
+            model_name=model_name,
+            selected_process_method=selected_process_method,
+            is_secondary_model=is_secondary_model,
+            primary_model_primary_stem=primary_model_primary_stem,
+            is_primary_model_primary_stem_only=is_primary_model_primary_stem_only,
+            is_primary_model_secondary_stem_only=is_primary_model_secondary_stem_only,
+            is_pre_proc_model=is_pre_proc_model,
+            is_dry_check=is_dry_check,
+            is_change_def=is_change_def,
+            is_get_hash_dir_only=is_get_hash_dir_only,
+            is_vocal_split_model=is_vocal_split_model,
+            settings=build_model_data_settings(),
+            resolvers=build_model_data_resolvers(),
+        )
 
 class Ensembler():
     def __init__(self, is_manual_ensemble=False):
@@ -7235,6 +7361,7 @@ def extract_stems(audio_file_base, export_path):
 
 system_helpers.configure_runtime(sys.modules[__name__])
 tk_helpers_module.configure_runtime(sys.modules[__name__])
+model_data_module.configure_runtime(sys.modules[__name__])
 ensemble_module.configure_runtime(sys.modules[__name__])
 audio_tools_module.configure_runtime(sys.modules[__name__])
 widgets_module.configure_runtime(sys.modules[__name__])
