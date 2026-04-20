@@ -28,7 +28,11 @@ uvr/
     processing.py
   ui/
     actions.py
+    file_inputs.py
     widgets.py
+    menus/
+      common.py
+      inputs.py
   utils/
     system.py
     tk_helpers.py
@@ -76,7 +80,7 @@ The two most important architectural issues were:
 Current highest-priority architectural issues are now:
 
 1. `MainWindow` still owns too much behavior, especially layout, menus, popups, file/input flows, and shared mutable UI state.
-2. Several extracted modules still depend on Tk-era runtime state, especially `AudioTools`, `Ensembler`, parts of `ProcessingController`, and Tk-specific helper flows.
+2. `ProcessingController` and the remaining menu/popup flows still depend on Tk-era runtime state and `UVR.py` composition wiring more than they should for a clean Qt migration.
 
 ## Refactor Principles
 
@@ -195,8 +199,9 @@ Current status:
 
 - implemented
 - active via alias rebinding in `UVR.py`
-- still reads `runtime.root` state directly
-- needs one more refactor pass before it is framework-neutral
+- now accepts explicit `EnsemblerSettings`
+- no longer reads `runtime.root` state directly
+- still depends on runtime-bound utility functions and composition wiring from `UVR.py`
 
 ### `uvr/domain/audio_tools.py`
 
@@ -208,8 +213,9 @@ Current status:
 
 - implemented
 - active via alias rebinding in `UVR.py`
-- still reads `runtime.root` state directly
-- needs one more refactor pass before it is framework-neutral
+- now accepts explicit `AudioToolSettings`
+- no longer reads `runtime.root` state directly
+- still depends on runtime-bound utility functions and composition wiring from `UVR.py`
 
 ### `uvr/services/processing.py`
 
@@ -231,8 +237,9 @@ Current status:
 - implemented
 - `MainWindow` now delegates process lifecycle methods to `ProcessingController`
 - the UI-facing method names still exist in `UVR.py`, but they are thin delegation shims
-- still contains Tk-coupled behavior in places, including dialog flow and some Tk variable usage
-- needs a callback- or adapter-based boundary before a clean Qt migration
+- dialog and button-state interactions are now routed through thin UI adapter methods
+- no longer creates Tk variable objects internally
+- still depends on the `MainWindow` UI surface and runtime composition layer
 
 ### `uvr/services/cache.py`
 
@@ -305,6 +312,26 @@ Current status:
   - saved-settings action helpers
 - layout/build methods and menu/popup logic are still in `UVR.py`
 
+### `uvr/ui/file_inputs.py`
+
+- file dialogs
+- input-path normalization
+- dual-input selection helpers
+- input entry text updates
+
+Current status:
+
+- implemented
+- `MainWindow` now delegates core file/input helper flows to this module
+- extracted so far:
+  - `show_file_dialog`
+  - `input_select_filedialog`
+  - `export_select_filedialog`
+  - `update_input_paths`
+  - `select_audiofile`
+  - `check_dual_paths`
+  - `process_input_selections`
+
 ### `uvr/ui/menus/`
 
 Split the large popup/menu methods into focused modules.
@@ -323,8 +350,41 @@ Suggested breakdown:
 
 Current status:
 
-- not started yet
-- menu and popup code still lives in `UVR.py`
+- started
+- extracted so far:
+  - `uvr/ui/menus/common.py`
+  - `uvr/ui/menus/inputs.py`
+- menu and popup code still largely lives in `UVR.py`, but the first menu slices now delegate through these modules
+
+### `uvr/ui/menus/common.py`
+
+- shared menu/popup window placement
+- shared tab scaffolding
+- reusable menu helper widgets/buttons
+
+Current status:
+
+- implemented
+- currently owns:
+  - `menu_placement`
+  - `adjust_widget_widths`
+  - `menu_tab_control`
+  - shared vocal-splitter button helper
+
+### `uvr/ui/menus/inputs.py`
+
+- input-related right-click menus
+- selected-inputs popup
+- dual-input batch popup
+
+Current status:
+
+- implemented
+- currently owns:
+  - `input_right_click_menu`
+  - `input_dual_right_click_menu`
+  - `menu_view_inputs`
+  - `menu_batch_dual`
 
 ### `uvr/utils/system.py`
 
@@ -524,6 +584,7 @@ Status:
 - completed
 - `uvr/services/processing.py` now contains `ProcessingController`
 - `MainWindow` still exposes the old process methods, but they delegate to the controller
+- follow-up stabilization work has also removed direct Tk dialogs/button constants and temporary Tk variable creation from the controller
 
 Outcome of phase 4:
 
@@ -561,14 +622,20 @@ Status:
 - partially complete
 - extracted so far:
   - `uvr/ui/actions.py`
+  - `uvr/ui/file_inputs.py`
+  - `uvr/ui/menus/common.py`
+  - `uvr/ui/menus/inputs.py`
   - selection handlers
   - widget state updates
   - saved-settings action flow
   - stem/ensemble UI transitions
+  - file/input helper flows
+  - shared menu infrastructure
+  - input-related menu/popup flows
 - still remaining in `UVR.py`:
   - layout/build methods
-  - menu/popup methods
-  - most file/input helper logic
+  - most settings/help/download/advanced menu bodies
+  - most popup bodies
 
 Outcome of phase 5:
 
@@ -578,7 +645,8 @@ Current reality:
 
 - `MainWindow` is thinner than before, but not yet thin
 - the biggest remaining UI weight is still layout/menu construction
-- file dialogs, input/path handling, and popup orchestration also still live primarily in `UVR.py`
+- file dialogs, input/path handling, and input-related popups no longer live primarily in `UVR.py`
+- the biggest remaining UI weight is now the larger settings/help/download/advanced menus and popup bodies
 
 ## Pre-PySide6 Stabilization Pass
 
@@ -589,21 +657,31 @@ What is already in good shape:
 - typed settings/persistence are in place
 - `ModelData` has a real non-Tk seam
 - processing orchestration has been extracted into a service module
+- `AudioTools` and `Ensembler` now accept explicit settings objects instead of reading `root`
+- core file/input helper flows and the first menu slices have been extracted from `MainWindow`
 
 What still blocks a clean Qt rewrite:
 
 - `MainWindow` still owns too much UI composition and state
-- `AudioTools` still reads `runtime.root` and Tk-backed values
-- `Ensembler` still reads `runtime.root` and Tk-backed values
-- `ProcessingController` still contains Tk-specific interactions
-- file-dialog and drag/drop flows are still centered on Tk behavior
+- the remaining large menu/popup bodies still live in `UVR.py`
+- `ProcessingController` still depends on the `MainWindow` UI surface rather than a narrower interface
+- runtime binding through `UVR.py` is still the primary composition strategy
+- drag/drop flows remain Tk-specific by design and will need a Qt replacement path later
 
 Recommended next pass before starting PySide6:
 
-1. finish Phase 5 by extracting menu/popup modules and file/input helpers out of `MainWindow`
-2. refactor `AudioTools` and `Ensembler` to accept typed settings/context objects instead of reading `runtime.root`
-3. remove Tk types and dialog assumptions from `ProcessingController` in favor of callbacks or a UI adapter
-4. introduce a framework-neutral app-state or view-model layer so Tk variables stop being the source of truth
+1. continue Phase 5 by extracting the remaining settings/help/download/advanced menu bodies and popup modules out of `MainWindow`
+2. keep narrowing the `ProcessingController` interface so it depends on a smaller UI adapter surface
+3. introduce a framework-neutral app-state or view-model layer so Tk variables stop being the source of truth
+4. leave Tk-specific drag/drop and widget behavior inside isolated UI modules so the later Qt replacement has a clear boundary
+
+Completed stabilization work so far:
+
+1. refactored `AudioTools` to accept `AudioToolSettings`
+2. refactored `Ensembler` to accept `EnsemblerSettings`
+3. removed direct Tk dialogs/button constants and temporary Tk variable creation from `ProcessingController`
+4. extracted file/input helper flows into `uvr/ui/file_inputs.py`
+5. extracted shared menu infrastructure and input-related menu slices into `uvr/ui/menus/common.py` and `uvr/ui/menus/inputs.py`
 
 This is intentionally a narrow pass. The goal is not to continue refactoring indefinitely; it is to complete the remaining boundary work that will make the PySide6 migration straightforward instead of coupled to unfinished cleanup.
 

@@ -69,7 +69,9 @@ from uvr.domain import model_data as model_data_module
 from uvr.services import processing as processing_service_module
 from uvr.ui import actions as ui_actions_module
 from uvr.ui import file_inputs as ui_file_inputs_module
+from uvr.ui.menus import advanced as advanced_menus_module
 from uvr.ui.menus import common as common_menus_module
+from uvr.ui.menus import downloads as download_menus_module
 from uvr.ui.menus import inputs as input_menus_module
 from uvr.ui import widgets as widgets_module
 from uvr.utils import system as system_helpers
@@ -1769,6 +1771,12 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     def input_menus(self):
         return input_menus_module.InputMenus(self)
 
+    def advanced_menus(self):
+        return advanced_menus_module.AdvancedMenus(self)
+
+    def download_menus(self):
+        return download_menus_module.DownloadMenus(self)
+
     def menu_helpers(self):
         return common_menus_module.MenuHelpers(self)
 
@@ -3087,80 +3095,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         settings_menu.protocol("WM_DELETE_WINDOW", close_window)
 
     def menu_advanced_vr_options(self):#**
-        """Open Advanced VR Options"""     
-
-        vr_opt = tk.Toplevel()
-        
-        tab1 = self.menu_tab_control(vr_opt, self.vr_secondary_model_vars)
-
-        self.is_open_menu_advanced_vr_options.set(True)
-        self.menu_advanced_vr_options_close_window = lambda:(self.is_open_menu_advanced_vr_options.set(False), vr_opt.destroy())
-        vr_opt.protocol("WM_DELETE_WINDOW", self.menu_advanced_vr_options_close_window)
-        
-        toggle_post_process = lambda:self.post_process_threshold_Option.configure(state=READ_ONLY) if self.is_post_process_var.get() else self.post_process_threshold_Option.configure(state=tk.DISABLED)
-        
-        vr_opt_frame = self.menu_FRAME_SET(tab1)
-        vr_opt_frame.grid(pady=0 if not self.chosen_process_method_var.get() == VR_ARCH_PM else 70)  
-        
-        vr_title = self.menu_title_LABEL_SET(vr_opt_frame, ADVANCED_VR_OPTIONS_TEXT)
-        vr_title.grid(padx=25, pady=MENU_PADDING_2)
-  
-        if not self.chosen_process_method_var.get() == VR_ARCH_PM:
-            window_size_Label = self.menu_sub_LABEL_SET(vr_opt_frame, WINDOW_SIZE_TEXT)
-            window_size_Label.grid(pady=MENU_PADDING_1)
-            window_size_Option = ComboBoxEditableMenu(vr_opt_frame, values=VR_WINDOW, width=MENU_COMBOBOX_WIDTH, textvariable=self.window_size_var, pattern=REG_WINDOW, default=VR_WINDOW[1])#
-            window_size_Option.grid(pady=MENU_PADDING_1)
-            self.help_hints(window_size_Label, text=WINDOW_SIZE_HELP)
-            
-            aggression_setting_Label = self.menu_sub_LABEL_SET(vr_opt_frame, AGGRESSION_SETTING_TEXT)
-            aggression_setting_Label.grid(pady=MENU_PADDING_1)
-            aggression_setting_Option = ComboBoxEditableMenu(vr_opt_frame, values=VR_AGGRESSION, width=MENU_COMBOBOX_WIDTH, textvariable=self.aggression_setting_var, pattern=REG_AGGRESSION, default=VR_AGGRESSION[5])#
-            aggression_setting_Option.grid(pady=MENU_PADDING_1)
-            self.help_hints(aggression_setting_Label, text=AGGRESSION_SETTING_HELP)
-        
-        self.batch_size_Label = self.menu_sub_LABEL_SET(vr_opt_frame, BATCH_SIZE_TEXT)
-        self.batch_size_Label.grid(pady=MENU_PADDING_1)
-        self.batch_size_Option = ComboBoxEditableMenu(vr_opt_frame, values=BATCH_SIZE, width=MENU_COMBOBOX_WIDTH, textvariable=self.batch_size_var, pattern=REG_BATCHES, default=BATCH_SIZE)#
-        self.batch_size_Option.grid(pady=MENU_PADDING_1)
-        self.help_hints(self.batch_size_Label, text=BATCH_SIZE_HELP)
-        
-        self.post_process_threshold_Label = self.menu_sub_LABEL_SET(vr_opt_frame, POST_PROCESS_THRESHOLD_TEXT)
-        self.post_process_threshold_Label.grid(pady=MENU_PADDING_1)
-        self.post_process_threshold_Option = ComboBoxEditableMenu(vr_opt_frame, values=POST_PROCESSES_THREASHOLD_VALUES, width=MENU_COMBOBOX_WIDTH, textvariable=self.post_process_threshold_var, pattern=REG_THES_POSTPORCESS, default=POST_PROCESSES_THREASHOLD_VALUES[1])#
-        self.post_process_threshold_Option.grid(pady=MENU_PADDING_1)
-        self.help_hints(self.post_process_threshold_Label, text=POST_PROCESS_THREASHOLD_HELP)
-        
-        self.is_tta_Option = ttk.Checkbutton(vr_opt_frame, text=ENABLE_TTA_TEXT, width=VR_CHECKBOXS_WIDTH, variable=self.is_tta_var) 
-        self.is_tta_Option.grid(pady=0)
-        self.help_hints(self.is_tta_Option, text=IS_TTA_HELP)
-        
-        self.is_post_process_Option = ttk.Checkbutton(vr_opt_frame, text=POST_PROCESS_TEXT, width=VR_CHECKBOXS_WIDTH, variable=self.is_post_process_var, command=toggle_post_process) 
-        self.is_post_process_Option.grid(pady=0)
-        self.help_hints(self.is_post_process_Option, text=IS_POST_PROCESS_HELP)
-        
-        self.is_high_end_process_Option = ttk.Checkbutton(vr_opt_frame, text=HIGHEND_PROCESS_TEXT, width=VR_CHECKBOXS_WIDTH, variable=self.is_high_end_process_var) 
-        self.is_high_end_process_Option.grid(pady=0)
-        self.help_hints(self.is_high_end_process_Option, text=IS_HIGH_END_PROCESS_HELP)
-        
-        self.vocal_splitter_Button_opt(vr_opt, vr_opt_frame, pady=MENU_PADDING_1, width=VR_BUT_WIDTH)
-        
-        self.vr_clear_cache_Button = ttk.Button(vr_opt_frame, text=CLEAR_AUTOSET_CACHE_TEXT, command=lambda:self.clear_cache(VR_ARCH_TYPE), width=VR_BUT_WIDTH)
-        self.vr_clear_cache_Button.grid(pady=MENU_PADDING_1)
-        self.help_hints(self.vr_clear_cache_Button, text=CLEAR_CACHE_HELP)
-        
-        self.open_vr_model_dir_Button = ttk.Button(vr_opt_frame, text=OPEN_MODELS_FOLDER_TEXT, command=lambda:OPEN_FILE_func(VR_MODELS_DIR), width=VR_BUT_WIDTH)
-        self.open_vr_model_dir_Button.grid(pady=MENU_PADDING_1)
-        
-        self.vr_return_Button=ttk.Button(vr_opt_frame, text=BACK_TO_MAIN_MENU, command=lambda:(self.menu_advanced_vr_options_close_window(), self.check_is_menu_settings_open()))
-        self.vr_return_Button.grid(pady=MENU_PADDING_1)
-
-        self.vr_close_Button = ttk.Button(vr_opt_frame, text=CLOSE_WINDOW, command=lambda:self.menu_advanced_vr_options_close_window())
-        self.vr_close_Button.grid(pady=MENU_PADDING_1)
-        
-        toggle_post_process()
-        
-        frame_list = [vr_opt_frame]
-        self.menu_placement(vr_opt, ADVANCED_VR_OPTIONS_TEXT, is_help_hints=True, close_function=self.menu_advanced_vr_options_close_window, frame_list=frame_list)
+        self.advanced_menus().menu_advanced_vr_options()
 
     def menu_advanced_demucs_options(self):#**
         """Open Advanced Demucs Options"""
@@ -3343,95 +3278,10 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         self.menu_placement(mdx_net_opt, ADVANCED_MDXNET_OPTIONS_TEXT, is_help_hints=True, close_function=self.menu_advanced_mdx_options_close_window, frame_list=frame_list)
 
     def menu_advanced_ensemble_options(self):#**
-        """Open Ensemble Custom"""
-        
-        custom_ens_opt = tk.Toplevel()
-        
-        self.is_open_menu_advanced_ensemble_options.set(True)
-        self.menu_advanced_ensemble_options_close_window = lambda:(self.is_open_menu_advanced_ensemble_options.set(False), custom_ens_opt.destroy())
-        custom_ens_opt.protocol("WM_DELETE_WINDOW", self.menu_advanced_ensemble_options_close_window)
-
-        option_var = tk.StringVar(value=SELECT_SAVED_ENSEMBLE)
-
-        custom_ens_opt_frame = self.menu_FRAME_SET(custom_ens_opt)
-        custom_ens_opt_frame.grid(row=0)  
-        
-        settings_title_Label = self.menu_title_LABEL_SET(custom_ens_opt_frame, ADVANCED_OPTION_MENU_TEXT)
-        settings_title_Label.grid(pady=MENU_PADDING_2)
-        
-        delete_entry_Label = self.menu_sub_LABEL_SET(custom_ens_opt_frame, REMOVE_SAVED_ENSEMBLE_TEXT)
-        delete_entry_Label.grid(pady=MENU_PADDING_1)
-        delete_entry_Option = ComboBoxMenu(custom_ens_opt_frame, textvariable=option_var, width=ENSEMBLE_CHECKBOXS_WIDTH+2)
-        delete_entry_Option.grid(padx=20,pady=MENU_PADDING_1)
-        
-        is_save_all_outputs_ensemble_Option = ttk.Checkbutton(custom_ens_opt_frame, text=SAVE_ALL_OUTPUTS_TEXT, width=ENSEMBLE_CHECKBOXS_WIDTH, variable=self.is_save_all_outputs_ensemble_var)
-        is_save_all_outputs_ensemble_Option.grid(pady=0)
-        self.help_hints(is_save_all_outputs_ensemble_Option, text=IS_SAVE_ALL_OUTPUTS_ENSEMBLE_HELP)
-
-        is_append_ensemble_name_Option = ttk.Checkbutton(custom_ens_opt_frame, text=APPEND_ENSEMBLE_NAME_TEXT, width=ENSEMBLE_CHECKBOXS_WIDTH, variable=self.is_append_ensemble_name_var) 
-        is_append_ensemble_name_Option.grid(pady=0)
-        self.help_hints(is_append_ensemble_name_Option, text=IS_APPEND_ENSEMBLE_NAME_HELP)
-
-        is_wav_ensemble_Option = ttk.Checkbutton(custom_ens_opt_frame, text=ENSEMBLE_WAVFORMS_TEXT, width=ENSEMBLE_CHECKBOXS_WIDTH, variable=self.is_wav_ensemble_var) 
-        is_wav_ensemble_Option.grid(pady=0)
-        self.help_hints(is_wav_ensemble_Option, text=IS_WAV_ENSEMBLE_HELP)
-
-        ensemble_return_Button = ttk.Button(custom_ens_opt_frame, text=BACK_TO_MAIN_MENU, command=lambda:(self.menu_advanced_ensemble_options_close_window(), self.check_is_menu_settings_open()))
-        ensemble_return_Button.grid(pady=MENU_PADDING_1)
-        
-        ensemble_close_Button = ttk.Button(custom_ens_opt_frame, text=CLOSE_WINDOW, command=lambda:self.menu_advanced_ensemble_options_close_window())
-        ensemble_close_Button.grid(pady=MENU_PADDING_1)
-        
-        self.deletion_list_fill(delete_entry_Option, option_var, ENSEMBLE_CACHE_DIR, SELECT_SAVED_ENSEMBLE, menu_name='deleteensemble')
-        
-        self.menu_placement(custom_ens_opt, ADVANCED_ENSEMBLE_OPTIONS_TEXT, is_help_hints=True, close_function=self.menu_advanced_ensemble_options_close_window)
+        self.advanced_menus().menu_advanced_ensemble_options()
 
     def menu_advanced_align_options(self):#**
-        """Open Ensemble Custom"""
-        
-        advanced_align_opt = tk.Toplevel()
-        
-        self.is_open_menu_advanced_align_options.set(True)
-        self.menu_advanced_align_options_close_window = lambda:(self.is_open_menu_advanced_align_options.set(False), advanced_align_opt.destroy())
-        advanced_align_opt.protocol("WM_DELETE_WINDOW", self.menu_advanced_align_options_close_window)
-
-        advanced_align_opt_frame = self.menu_FRAME_SET(advanced_align_opt)
-        advanced_align_opt_frame.grid(row=0)  
-        
-        settings_title_Label = self.menu_title_LABEL_SET(advanced_align_opt_frame, ADVANCED_ALIGN_TOOL_OPTIONS_TEXT)
-        settings_title_Label.grid(pady=MENU_PADDING_2)
-        
-        phase_option_Label = self.menu_sub_LABEL_SET(advanced_align_opt_frame, SECONDARY_PHASE_TEXT)
-        phase_option_Label.grid(pady=4)
-        phase_option_Option = ComboBoxMenu(advanced_align_opt_frame, textvariable=self.phase_option_var, values=ALIGN_PHASE_OPTIONS, width=MENU_COMBOBOX_WIDTH)
-        phase_option_Option.grid(pady=4)
-        self.help_hints(phase_option_Label, text=IS_PHASE_HELP)
-        
-        phase_shifts_Label = self.menu_sub_LABEL_SET(advanced_align_opt_frame, PHASE_SHIFTS_TEXT)
-        phase_shifts_Label.grid(pady=4)#
-        phase_shifts_Option = ComboBoxMenu(advanced_align_opt_frame, textvariable=self.phase_shifts_var, values=list(PHASE_SHIFTS_OPT.keys()), width=MENU_COMBOBOX_WIDTH)
-        phase_shifts_Option.grid(pady=4)
-        self.help_hints(phase_shifts_Label, text=PHASE_SHIFTS_ALIGN_HELP)
-        
-        is_save_align_Option = ttk.Checkbutton(advanced_align_opt_frame, text=SAVE_ALIGNED_TRACK_TEXT, width=MDX_CHECKBOXS_WIDTH, variable=self.is_save_align_var)
-        is_save_align_Option.grid(pady=0)
-        self.help_hints(is_save_align_Option, text=IS_ALIGN_TRACK_HELP)
-        
-        is_match_silence_Option = ttk.Checkbutton(advanced_align_opt_frame, text=SILENCE_MATCHING_TEXT, width=MDX_CHECKBOXS_WIDTH, variable=self.is_match_silence_var)
-        is_match_silence_Option.grid(pady=0)
-        self.help_hints(is_match_silence_Option, text=IS_MATCH_SILENCE_HELP)
-
-        is_spec_match_Option = ttk.Checkbutton(advanced_align_opt_frame, text=SPECTRAL_MATCHING_TEXT, width=MDX_CHECKBOXS_WIDTH, variable=self.is_spec_match_var)
-        is_spec_match_Option.grid(pady=0)
-        self.help_hints(is_spec_match_Option, text=IS_MATCH_SPEC_HELP)
-
-        ensemble_return_Button = ttk.Button(advanced_align_opt_frame, text=BACK_TO_MAIN_MENU, command=lambda:(self.menu_advanced_align_options_close_window(), self.check_is_menu_settings_open()))
-        ensemble_return_Button.grid(pady=MENU_PADDING_1)
-        
-        ensemble_close_Button = ttk.Button(advanced_align_opt_frame, text=CLOSE_WINDOW, command=lambda:self.menu_advanced_align_options_close_window())
-        ensemble_close_Button.grid(pady=MENU_PADDING_1)
-        
-        self.menu_placement(advanced_align_opt, ADVANCED_ALIGN_TOOL_OPTIONS_TEXT, is_help_hints=True, close_function=self.menu_advanced_align_options_close_window)
+        self.advanced_menus().menu_advanced_align_options()
  
     def menu_help(self):#**
         """Open Help Guide"""
@@ -3817,125 +3667,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         pre_proc_model_toggle()
         
     def menu_manual_downloads(self):
-        
-        manual_downloads_menu = tk.Toplevel()
-        model_selection_var = tk.StringVar(value=SELECT_MODEL_TEXT)
-        #info_text_var = tk.StringVar(value='')
-
-        if self.is_online:
-            model_data = self.online_data
-            
-            # Save the data as a JSON file
-            with open(DOWNLOAD_MODEL_CACHE, 'w') as json_file:
-                json.dump(model_data, json_file)
-                
-        else:
-            if os.path.isfile(DOWNLOAD_MODEL_CACHE):
-                with open(DOWNLOAD_MODEL_CACHE, 'r') as json_file:
-                    model_data = json.load(json_file)
-                    
-        vr_download_list = model_data["vr_download_list"]
-        mdx_download_list = model_data["mdx_download_list"]
-        demucs_download_list = model_data["demucs_download_list"]
-        mdx_download_list.update(model_data["mdx23c_download_list"])
-
-        def create_link(link):
-            final_link = lambda:webbrowser.open_new_tab(link)
-            return final_link
-            
-        def get_links():
-            for widgets in manual_downloads_link_Frame.winfo_children():
-                widgets.destroy()
-                
-            main_selection = model_selection_var.get()
-            
-            MAIN_ROW = 0
-            
-            self.menu_sub_LABEL_SET(manual_downloads_link_Frame, 'Download Link(s)').grid(row=0,column=0,padx=0,pady=MENU_PADDING_4)
-            
-            if VR_ARCH_TYPE in main_selection:
-                main_selection = vr_download_list[main_selection]
-                model_dir = VR_MODELS_DIR
-            elif MDX_ARCH_TYPE in main_selection or MDX_23_NAME in main_selection:
-                if isinstance(mdx_download_list[main_selection], dict):
-                    main_selection = mdx_download_list[main_selection]
-                    main_selection = list(main_selection.keys())[0]
-                else:
-                    main_selection = mdx_download_list[main_selection]
-                    
-                model_dir = MDX_MODELS_DIR
-
-            elif DEMUCS_ARCH_TYPE in main_selection:
-                model_dir = DEMUCS_NEWER_REPO_DIR if 'v3' in main_selection or 'v4' in main_selection else DEMUCS_MODELS_DIR
-                main_selection = demucs_download_list[main_selection]
-
-            if type(main_selection) is dict:
-                for links in main_selection.values():
-                    MAIN_ROW += 1
-                    button_text = f" - Item {MAIN_ROW}" if len(main_selection.keys()) >= 2 else ''
-                    link = create_link(links)
-                    link_button = ttk.Button(manual_downloads_link_Frame, text=f"Open Link to Model{button_text}", command=link).grid(row=MAIN_ROW,column=0,padx=0,pady=MENU_PADDING_1)
-            else:
-                link = f"{NORMAL_REPO}{main_selection}"
-                link_button = ttk.Button(manual_downloads_link_Frame, text=OPEN_LINK_TO_MODEL_TEXT, command=lambda:webbrowser.open_new_tab(link))
-                link_button.grid(row=1,column=0,padx=0,pady=MENU_PADDING_2)
-        
-            self.menu_sub_LABEL_SET(manual_downloads_link_Frame, SELECTED_MODEL_PLACE_PATH_TEXT).grid(row=MAIN_ROW+2,column=0,padx=0,pady=MENU_PADDING_4)
-            ttk.Button(manual_downloads_link_Frame, text=OPEN_MODEL_DIRECTORY_TEXT, command=lambda:OPEN_FILE_func(model_dir)).grid(row=MAIN_ROW+3,column=0,padx=0,pady=MENU_PADDING_1)
-        
-        manual_downloads_menu_Frame = self.menu_FRAME_SET(manual_downloads_menu)
-        manual_downloads_menu_Frame.grid(row=0)  
-
-        manual_downloads_link_Frame = self.menu_FRAME_SET(manual_downloads_menu, thickness=5)
-        manual_downloads_link_Frame.grid(row=1)  
-
-        manual_downloads_menu_title_Label = self.menu_title_LABEL_SET(manual_downloads_menu_Frame, MANUAL_DOWNLOADS_TEXT, width=45)
-        manual_downloads_menu_title_Label.grid(row=0,column=0,padx=0,pady=MENU_PADDING_3)
-        
-        manual_downloads_menu_select_Label = self.menu_sub_LABEL_SET(manual_downloads_menu_Frame, SELECT_MODEL_TEXT)
-        manual_downloads_menu_select_Label.grid(row=1,column=0,padx=0,pady=MENU_PADDING_1)
-        
-        manual_downloads_menu_select_Option = ttk.OptionMenu(manual_downloads_menu_Frame, model_selection_var)
-        manual_downloads_menu_select_VR_Option = tk.Menu(manual_downloads_menu_select_Option['menu'])
-        manual_downloads_menu_select_MDX_Option = tk.Menu(manual_downloads_menu_select_Option['menu'])
-        manual_downloads_menu_select_DEMUCS_Option = tk.Menu(manual_downloads_menu_select_Option['menu'])
-        manual_downloads_menu_select_Option['menu'].add_cascade(label='VR Models', menu= manual_downloads_menu_select_VR_Option)
-        manual_downloads_menu_select_Option['menu'].add_cascade(label='MDX-Net Models', menu= manual_downloads_menu_select_MDX_Option)
-        manual_downloads_menu_select_Option['menu'].add_cascade(label='Demucs Models', menu= manual_downloads_menu_select_DEMUCS_Option)
-
-        for model_selection_vr in vr_download_list.keys():
-            if not os.path.isfile(os.path.join(VR_MODELS_DIR, vr_download_list[model_selection_vr])):
-                manual_downloads_menu_select_VR_Option.add_radiobutton(label=model_selection_vr, variable=model_selection_var, command=get_links)
-            
-        for model_selection_mdx in mdx_download_list.keys():
-            
-            model_name = mdx_download_list[model_selection_mdx]
-            
-            if isinstance(model_name, dict):
-                items_list = list(model_name.items())
-                model_name, config = items_list[0]
-                config_link = f"{MDX23_CONFIG_CHECKS}{config}"
-                config_local = os.path.join(MDX_C_CONFIG_PATH, config)
-                if not os.path.isfile(config_local):
-                    try:
-                        with urllib.request.urlopen(config_link) as response:
-                            with open(config_local, 'wb') as out_file:
-                                out_file.write(response.read())
-                    except Exception as e:
-                        model_name = None
-
-            #print(model_name)
-                
-            if model_name: 
-                if not os.path.isfile(os.path.join(MDX_MODELS_DIR, model_name)):
-                    manual_downloads_menu_select_MDX_Option.add_radiobutton(label=model_selection_mdx, variable=model_selection_var, command=get_links)
-            
-        for model_selection_demucs in demucs_download_list.keys():
-            manual_downloads_menu_select_DEMUCS_Option.add_radiobutton(label=model_selection_demucs, variable=model_selection_var, command=get_links)
-            
-        manual_downloads_menu_select_Option.grid(row=2,column=0,padx=0,pady=MENU_PADDING_1)
-    
-        self.menu_placement(manual_downloads_menu, MANUAL_DOWNLOADS_TEXT, pop_up=True, close_function=lambda:manual_downloads_menu.destroy())
+        self.download_menus().menu_manual_downloads()
         
     def invalid_tooltip(self, widget, pattern=None):
         tooltip = ToolTip(widget)
@@ -4014,91 +3746,10 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
                 outfile.write(saved_data_dump)
 
     def pop_up_update_confirmation(self):
-        """Ask user is they want to update"""
-        
-        is_new_update = self.online_data_refresh(confirmation_box=True)
-        is_download_in_app_var = tk.BooleanVar(value=False)
-        
-        def update_type():
-            if is_download_in_app_var.get():
-                self.download_item(is_update_app=True)
-            else:
-                webbrowser.open_new_tab(self.download_update_link_var.get())
-
-            update_confirmation_win.destroy()
-            
-        if is_new_update:
-            
-            update_confirmation_win = tk.Toplevel()
-
-            update_confirmation_Frame = self.menu_FRAME_SET(update_confirmation_win)
-            update_confirmation_Frame.grid(row=0)  
-            
-            update_found_label = self.menu_title_LABEL_SET(update_confirmation_Frame, UPDATE_FOUND_TEXT, width=15)
-            update_found_label.grid(row=0,column=0,padx=0,pady=MENU_PADDING_2)
-            
-            confirm_update_label = self.menu_sub_LABEL_SET(update_confirmation_Frame, UPDATE_CONFIRMATION_TEXT, font_size=FONT_SIZE_3)
-            confirm_update_label.grid(row=1,column=0,padx=0,pady=MENU_PADDING_1)
-                    
-            yes_button = ttk.Button(update_confirmation_Frame, text=YES_TEXT, command=update_type)
-            yes_button.grid(row=2,column=0,padx=0,pady=MENU_PADDING_1)
-            
-            no_button = ttk.Button(update_confirmation_Frame, text=NO_TEXT, command=lambda:(update_confirmation_win.destroy()))
-            no_button.grid(row=3,column=0,padx=0,pady=MENU_PADDING_1)
-            
-            if is_windows:
-                download_outside_application_button = ttk.Checkbutton(update_confirmation_Frame, variable=is_download_in_app_var, text='Download Update in Application')
-                download_outside_application_button.grid(row=4,column=0,padx=0,pady=MENU_PADDING_1)
-
-            self.menu_placement(update_confirmation_win, CONFIRM_UPDATE_TEXT, pop_up=True)
+        self.download_menus().pop_up_update_confirmation()
 
     def pop_up_user_code_input(self):
-        """Input VIP Code"""
-
-        self.user_code_validation_var.set('')
-        
-        self.user_code = tk.Toplevel()
-        
-        user_code_Frame = self.menu_FRAME_SET(self.user_code)
-        user_code_Frame.grid(row=0)  
-                
-        user_code_title_Label = self.menu_title_LABEL_SET(user_code_Frame, USER_DOWNLOAD_CODES_TEXT, width=20)
-        user_code_title_Label.grid(row=0,column=0,padx=0,pady=MENU_PADDING_1)    
-        
-        user_code_Label = self.menu_sub_LABEL_SET(user_code_Frame, DOWNLOAD_CODE_TEXT)
-        user_code_Label.grid(pady=MENU_PADDING_1)       
-                
-        self.user_code_Entry = ttk.Entry(user_code_Frame, textvariable=self.user_code_var, justify='center')
-        self.user_code_Entry.grid(pady=MENU_PADDING_1)
-        self.user_code_Entry.bind(right_click_button, self.right_click_menu_popup)
-        self.current_text_box = self.user_code_Entry
-        
-        tooltip = ToolTip(self.user_code_Entry)
-        def invalid_message_(text, is_success_message):
-            tooltip.hidetip()
-            tooltip.showtip(text, True, is_success_message)
-        
-        self.spacer_label(user_code_Frame)
-
-        user_code_confrim_Button = ttk.Button(user_code_Frame, text=CONFIRM_TEXT, command=lambda:self.download_validate_code(confirm=True, code_message=invalid_message_))
-        user_code_confrim_Button.grid(pady=MENU_PADDING_1)
-        
-        user_code_cancel_Button = ttk.Button(user_code_Frame, text=CANCEL_TEXT, command=lambda:self.user_code.destroy())
-        user_code_cancel_Button.grid(pady=MENU_PADDING_1)
-        
-        support_title_Label = self.menu_title_LABEL_SET(user_code_Frame, text=SUPPORT_UVR_TEXT, width=20)
-        support_title_Label.grid(pady=MENU_PADDING_1)    
-        
-        support_sub_Label = tk.Label(user_code_Frame, text=GET_DL_VIP_CODE_TEXT, font=(MAIN_FONT_NAME, f"{FONT_SIZE_1}"), foreground=FG_COLOR)
-        support_sub_Label.grid(pady=MENU_PADDING_1)
-        
-        uvr_patreon_Button = ttk.Button(user_code_Frame, text=UVR_PATREON_LINK_TEXT, command=lambda:webbrowser.open_new_tab(DONATE_LINK_PATREON))
-        uvr_patreon_Button.grid(pady=MENU_PADDING_1)
-        
-        bmac_patreon_Button=ttk.Button(user_code_Frame, text=BMAC_UVR_TEXT, command=lambda:webbrowser.open_new_tab(DONATE_LINK_BMAC))
-        bmac_patreon_Button.grid(pady=MENU_PADDING_1)
-        
-        self.menu_placement(self.user_code, INPUT_CODE_TEXT, pop_up=True)
+        self.download_menus().pop_up_user_code_input()
 
     def pop_up_change_model_defaults(self, top_window):
         """
@@ -6041,7 +5692,9 @@ model_data_module.configure_runtime(sys.modules[__name__])
 processing_service_module.configure_runtime(sys.modules[__name__])
 ui_actions_module.configure_runtime(sys.modules[__name__])
 ui_file_inputs_module.configure_runtime(sys.modules[__name__])
+advanced_menus_module.configure_runtime(sys.modules[__name__])
 common_menus_module.configure_runtime(sys.modules[__name__])
+download_menus_module.configure_runtime(sys.modules[__name__])
 input_menus_module.configure_runtime(sys.modules[__name__])
 ensemble_module.configure_runtime(sys.modules[__name__])
 audio_tools_module.configure_runtime(sys.modules[__name__])
