@@ -16,6 +16,293 @@ class AdvancedMenus:
     def __init__(self, ui: Any):
         self.ui = ui
 
+    def menu_help(self) -> None:
+        """Open help guide."""
+
+        help_guide_opt = runtime.tk.Toplevel()
+
+        self.ui.is_open_menu_help.set(True)
+        self.ui.menu_help_close_window = lambda: (self.ui.is_open_menu_help.set(False), help_guide_opt.destroy())
+        help_guide_opt.protocol("WM_DELETE_WINDOW", self.ui.menu_help_close_window)
+
+        tabControl = runtime.ttk.Notebook(help_guide_opt)
+
+        tab1 = runtime.ttk.Frame(tabControl)
+        tab2 = runtime.ttk.Frame(tabControl)
+        tab3 = runtime.ttk.Frame(tabControl)
+        tab4 = runtime.ttk.Frame(tabControl)
+
+        tabControl.add(tab1, text="Credits")
+        tabControl.add(tab2, text="Resources")
+        tabControl.add(tab3, text="Application License & Version Information")
+        tabControl.add(tab4, text="Additional Information")
+
+        tabControl.pack(expand=1, fill="both")
+
+        tab1.grid_rowconfigure(0, weight=1)
+        tab1.grid_columnconfigure(0, weight=1)
+        tab2.grid_rowconfigure(0, weight=1)
+        tab2.grid_columnconfigure(0, weight=1)
+        tab3.grid_rowconfigure(0, weight=1)
+        tab3.grid_columnconfigure(0, weight=1)
+        tab4.grid_rowconfigure(0, weight=1)
+        tab4.grid_columnconfigure(0, weight=1)
+
+        section_title_Label = lambda place, frame, text, font_size=runtime.FONT_SIZE_4: runtime.tk.Label(
+            master=frame,
+            text=text,
+            font=(runtime.MAIN_FONT_NAME, f"{font_size}", "bold"),
+            justify="center",
+            fg="#F4F4F4",
+        ).grid(row=place, column=0, padx=0, pady=runtime.MENU_PADDING_4)
+        description_Label = lambda place, frame, text, font=runtime.FONT_SIZE_2: runtime.tk.Label(
+            master=frame,
+            text=text,
+            font=(runtime.MAIN_FONT_NAME, f"{font}"),
+            justify="center",
+            fg="#F6F6F7",
+        ).grid(row=place, column=0, padx=0, pady=runtime.MENU_PADDING_4)
+
+        def credit_label(
+            place: int,
+            frame: Any,
+            text: str,
+            link: str | None = None,
+            message: str | None = None,
+            is_link: bool = False,
+            is_top: bool = False,
+        ) -> None:
+            if is_top:
+                thank = runtime.tk.Label(
+                    master=frame,
+                    text=text,
+                    font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_3}", "bold"),
+                    justify="center",
+                    fg="#13849f",
+                )
+            else:
+                thank = runtime.tk.Label(
+                    master=frame,
+                    text=text,
+                    font=(
+                        runtime.MAIN_FONT_NAME,
+                        f"{runtime.FONT_SIZE_3}",
+                        "underline" if is_link else "normal",
+                    ),
+                    justify="center",
+                    fg="#13849f",
+                )
+            thank.configure(cursor="hand2") if is_link else None
+            thank.grid(row=place, column=0, padx=0, pady=1)
+            if link:
+                thank.bind("<Button-1>", lambda e: runtime.webbrowser.open_new_tab(link))
+            if message:
+                description_Label(place + 1, frame, message)
+
+        def Link(place: int, frame: Any, text: str, link: str, description: str, font: int = runtime.FONT_SIZE_2) -> None:
+            link_label = runtime.tk.Label(
+                master=frame,
+                text=text,
+                font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_4}", "underline"),
+                foreground=runtime.FG_COLOR,
+                justify="center",
+                cursor="hand2",
+            )
+            link_label.grid(row=place, column=0, padx=0, pady=runtime.MENU_PADDING_1)
+            link_label.bind("<Button-1>", lambda e: runtime.webbrowser.open_new_tab(link))
+            description_Label(place + 1, frame, description, font=font)
+
+        def right_click_menu(event: Any) -> None:
+            right_click_menu = runtime.tk.Menu(self.ui, font=(runtime.MAIN_FONT_NAME, runtime.FONT_SIZE_1), tearoff=0)
+            right_click_menu.add_command(
+                label="Return to Settings Menu",
+                command=lambda: (self.ui.menu_help_close_window(), self.ui.check_is_menu_settings_open()),
+            )
+            right_click_menu.add_command(label="Exit Window", command=lambda: self.ui.menu_help_close_window())
+
+            try:
+                right_click_menu.tk_popup(event.x_root, event.y_root)
+                runtime.right_click_release_linux(right_click_menu, help_guide_opt)
+            finally:
+                right_click_menu.grab_release()
+
+        help_guide_opt.bind(runtime.right_click_button, lambda e: right_click_menu(e))
+        credits_Frame = runtime.tk.Frame(tab1, highlightthicknes=50)
+        credits_Frame.grid(row=0, column=0, padx=0, pady=0)
+        runtime.tk.Label(credits_Frame, image=self.ui.credits_img).grid(row=1, column=0, padx=0, pady=runtime.MENU_PADDING_1)
+
+        section_title_Label(place=0, frame=credits_Frame, text="Core UVR Developers")
+        credit_label(place=2, frame=credits_Frame, text="Anjok07\nAufr33", is_top=True)
+        section_title_Label(place=3, frame=credits_Frame, text="Special Thanks")
+        credit_label(
+            place=6,
+            frame=credits_Frame,
+            text="Tsurumeso",
+            message="Developed the original VR Architecture AI code.",
+            link="https://github.com/tsurumeso/vocal-remover",
+            is_link=True,
+        )
+        credit_label(
+            place=8,
+            frame=credits_Frame,
+            text="Kuielab & Woosung Choi",
+            message="Developed the original MDX-Net AI code.",
+            link="https://github.com/kuielab",
+            is_link=True,
+        )
+        credit_label(
+            place=10,
+            frame=credits_Frame,
+            text="Adefossez & Demucs",
+            message="Core developer of Facebook's Demucs Music Source Separation.",
+            link="https://github.com/facebookresearch/demucs",
+            is_link=True,
+        )
+        credit_label(
+            place=12,
+            frame=credits_Frame,
+            text="Bas Curtiz",
+            message="Designed the official UVR logo, icon, banner, splash screen.",
+        )
+        credit_label(
+            place=14,
+            frame=credits_Frame,
+            text="DilanBoskan",
+            message="Your contributions at the start of this project were essential to the success of UVR. Thank you!",
+        )
+        credit_label(
+            place=16,
+            frame=credits_Frame,
+            text="Audio Separation and CC Karaoke & Friends Discord Communities",
+            message="Thank you for the support!",
+        )
+
+        more_info_tab_Frame = runtime.tk.Frame(tab2, highlightthicknes=30)
+        more_info_tab_Frame.grid(row=0, column=0, padx=0, pady=0)
+
+        section_title_Label(place=3, frame=more_info_tab_Frame, text="Resources")
+        Link(
+            place=4,
+            frame=more_info_tab_Frame,
+            text="Ultimate Vocal Remover (Official GitHub)",
+            link="https://github.com/Anjok07/ultimatevocalremovergui",
+            description="You can find updates, report issues, and give us a shout via our official GitHub.",
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=8,
+            frame=more_info_tab_Frame,
+            text="X-Minus AI",
+            link="https://x-minus.pro/ai",
+            description="Many of the models provided are also on X-Minus.\nX-Minus benefits users without the computing resources to run the GUI or models locally.",
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=12,
+            frame=more_info_tab_Frame,
+            text="MVSep",
+            link="https://mvsep.com/quality_checker/leaderboard.php",
+            description="Some of our models are also on MVSep.\nClick the link above for a list of some of the best settings \nand model combinations recorded by fellow UVR users.\nSpecial thanks to ZFTurbo for all his work on MVSep!",
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=18,
+            frame=more_info_tab_Frame,
+            text="FFmpeg",
+            link="https://www.wikihow.com/Install-FFmpeg-on-Windows",
+            description="UVR relies on FFmpeg for processing non-wav audio files.\nIf you are missing FFmpeg, please see the installation guide via the link provided.",
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=22,
+            frame=more_info_tab_Frame,
+            text="Rubber Band Library",
+            link="https://breakfastquay.com/rubberband/",
+            description="UVR uses the Rubber Band library for the sound stretch and pitch shift tool.\nYou can get more information on it via the link provided.",
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=26,
+            frame=more_info_tab_Frame,
+            text="Matchering",
+            link="https://github.com/sergree/matchering",
+            description='UVR uses the Matchering library for the "Matchering" Audio Tool.\nYou can get more information on it via the link provided.',
+            font=runtime.FONT_SIZE_1,
+        )
+        Link(
+            place=30,
+            frame=more_info_tab_Frame,
+            text="Official UVR BMAC",
+            link=runtime.DONATE_LINK_BMAC,
+            description="If you wish to support and donate to this project, click the link above!",
+            font=runtime.FONT_SIZE_1,
+        )
+
+        appplication_license_tab_Frame = runtime.tk.Frame(tab3)
+        appplication_license_tab_Frame.grid(row=0, column=0, padx=0, pady=0)
+
+        runtime.tk.Label(
+            appplication_license_tab_Frame,
+            text="UVR License Information",
+            font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_6}", "bold"),
+            justify="center",
+            fg="#f4f4f4",
+        ).grid(row=0, column=0, padx=0, pady=25)
+
+        appplication_license_Text = runtime.tk.Text(
+            appplication_license_tab_Frame,
+            font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_4}"),
+            fg="white",
+            bg="black",
+            width=72,
+            wrap=runtime.tk.WORD,
+            borderwidth=0,
+        )
+        appplication_license_Text.grid(row=1, column=0, padx=0, pady=0)
+        appplication_license_Text_scroll = runtime.ttk.Scrollbar(
+            appplication_license_tab_Frame, orient=runtime.tk.VERTICAL
+        )
+        appplication_license_Text.config(yscrollcommand=appplication_license_Text_scroll.set)
+        appplication_license_Text_scroll.configure(command=appplication_license_Text.yview)
+        appplication_license_Text.grid(row=4, sticky=runtime.tk.W)
+        appplication_license_Text_scroll.grid(row=4, column=1, sticky=runtime.tk.NS)
+        appplication_license_Text.insert("insert", runtime.LICENSE_TEXT(runtime.VERSION, runtime.current_patch))
+        appplication_license_Text.configure(state=runtime.tk.DISABLED)
+
+        application_change_log_tab_Frame = runtime.tk.Frame(tab4)
+        application_change_log_tab_Frame.grid(row=0, column=0, padx=0, pady=0)
+
+        runtime.tk.Label(
+            application_change_log_tab_Frame,
+            text="Additional Information",
+            font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_6}", "bold"),
+            justify="center",
+            fg="#f4f4f4",
+        ).grid(row=0, column=0, padx=0, pady=25)
+
+        application_change_log_Text = runtime.tk.Text(
+            application_change_log_tab_Frame,
+            font=(runtime.MAIN_FONT_NAME, f"{runtime.FONT_SIZE_4}"),
+            fg="white",
+            bg="black",
+            width=72,
+            wrap=runtime.tk.WORD,
+            borderwidth=0,
+        )
+        application_change_log_Text.grid(row=1, column=0, padx=40 if runtime.is_macos else 30, pady=0)
+        application_change_log_Text_scroll = runtime.ttk.Scrollbar(
+            application_change_log_tab_Frame, orient=runtime.tk.VERTICAL
+        )
+        application_change_log_Text.config(yscrollcommand=application_change_log_Text_scroll.set)
+        application_change_log_Text_scroll.configure(command=application_change_log_Text.yview)
+        application_change_log_Text.grid(row=4, sticky=runtime.tk.W)
+        application_change_log_Text_scroll.grid(row=4, column=1, sticky=runtime.tk.NS)
+        application_change_log_Text.insert("insert", self.ui.bulletin_data)
+        runtime.auto_hyperlink(application_change_log_Text)
+        application_change_log_Text.configure(state=runtime.tk.DISABLED)
+
+        self.ui.menu_placement(help_guide_opt, "Information Guide")
+
     def menu_advanced_vr_options(self) -> None:
         """Open advanced VR options."""
 
