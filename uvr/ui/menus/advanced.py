@@ -163,6 +163,345 @@ class AdvancedMenus:
             frame_list=[vr_opt_frame],
         )
 
+    def menu_advanced_demucs_options(self) -> None:
+        """Open advanced Demucs options."""
+
+        demuc_opt = runtime.tk.Toplevel()
+
+        self.ui.is_open_menu_advanced_demucs_options.set(True)
+        self.ui.menu_advanced_demucs_options_close_window = lambda: (
+            self.ui.is_open_menu_advanced_demucs_options.set(False),
+            demuc_opt.destroy(),
+        )
+        demuc_opt.protocol("WM_DELETE_WINDOW", self.ui.menu_advanced_demucs_options_close_window)
+
+        tab1, tab3 = self.ui.menu_tab_control(demuc_opt, self.ui.demucs_secondary_model_vars, is_demucs=True)
+
+        demucs_frame = self.ui.menu_FRAME_SET(tab1)
+        demucs_frame.grid(pady=0 if self.ui.chosen_process_method_var.get() != runtime.DEMUCS_ARCH_TYPE else 55)
+
+        demucs_pre_model_frame = self.ui.menu_FRAME_SET(tab3)
+        demucs_pre_model_frame.grid(row=0)
+
+        self.ui.menu_title_LABEL_SET(demucs_frame, runtime.ADVANCED_DEMUCS_OPTIONS_TEXT).grid(
+            pady=runtime.MENU_PADDING_2
+        )
+
+        if self.ui.chosen_process_method_var.get() != runtime.DEMUCS_ARCH_TYPE:
+            segment_Label = self.ui.menu_sub_LABEL_SET(demucs_frame, runtime.SEGMENTS_TEXT)
+            segment_Label.grid(pady=runtime.MENU_PADDING_2)
+            runtime.ComboBoxEditableMenu(
+                demucs_frame,
+                values=runtime.DEMUCS_SEGMENTS,
+                width=runtime.MENU_COMBOBOX_WIDTH,
+                textvariable=self.ui.segment_var,
+                pattern=runtime.REG_SEGMENTS,
+                default=runtime.DEMUCS_SEGMENTS,
+            ).grid()
+            self.ui.help_hints(segment_Label, text=runtime.SEGMENT_HELP)
+
+        self.ui.shifts_Label = self.ui.menu_sub_LABEL_SET(demucs_frame, runtime.SHIFTS_TEXT)
+        self.ui.shifts_Label.grid(pady=runtime.MENU_PADDING_1)
+        self.ui.shifts_Option = runtime.ComboBoxEditableMenu(
+            demucs_frame,
+            values=runtime.DEMUCS_SHIFTS,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.shifts_var,
+            pattern=runtime.REG_SHIFTS,
+            default=runtime.DEMUCS_SHIFTS[2],
+        )
+        self.ui.shifts_Option.grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(self.ui.shifts_Label, text=runtime.SHIFTS_HELP)
+
+        self.ui.overlap_Label = self.ui.menu_sub_LABEL_SET(demucs_frame, runtime.OVERLAP_TEXT)
+        self.ui.overlap_Label.grid(pady=runtime.MENU_PADDING_1)
+        self.ui.overlap_Option = runtime.ComboBoxEditableMenu(
+            demucs_frame,
+            values=runtime.DEMUCS_OVERLAP,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.overlap_var,
+            pattern=runtime.REG_OVERLAP,
+            default=runtime.DEMUCS_OVERLAP,
+        )
+        self.ui.overlap_Option.grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(self.ui.overlap_Label, text=runtime.OVERLAP_HELP)
+
+        pitch_shift_Label = self.ui.menu_sub_LABEL_SET(demucs_frame, runtime.SHIFT_CONVERSION_PITCH_TEXT)
+        pitch_shift_Label.grid(pady=runtime.MENU_PADDING_1)
+        runtime.ComboBoxEditableMenu(
+            demucs_frame,
+            values=runtime.SEMITONE_SEL,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.semitone_shift_var,
+            pattern=runtime.REG_SEMITONES,
+            default=runtime.SEMI_DEF,
+        ).grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(pitch_shift_Label, text=runtime.PITCH_SHIFT_HELP)
+
+        self.ui.is_split_mode_Option = runtime.ttk.Checkbutton(
+            demucs_frame,
+            text=runtime.SPLIT_MODE_TEXT,
+            width=runtime.DEMUCS_CHECKBOXS_WIDTH,
+            variable=self.ui.is_split_mode_var,
+        )
+        self.ui.is_split_mode_Option.grid()
+        self.ui.help_hints(self.ui.is_split_mode_Option, text=runtime.IS_SPLIT_MODE_HELP)
+
+        self.ui.is_demucs_combine_stems_Option = runtime.ttk.Checkbutton(
+            demucs_frame,
+            text=runtime.COMBINE_STEMS_TEXT,
+            width=runtime.DEMUCS_CHECKBOXS_WIDTH,
+            variable=self.ui.is_demucs_combine_stems_var,
+        )
+        self.ui.is_demucs_combine_stems_Option.grid()
+        self.ui.help_hints(self.ui.is_demucs_combine_stems_Option, text=runtime.IS_DEMUCS_COMBINE_STEMS_HELP)
+
+        is_invert_spec_Option = runtime.ttk.Checkbutton(
+            demucs_frame,
+            text=runtime.SPECTRAL_INVERSION_TEXT,
+            width=runtime.DEMUCS_CHECKBOXS_WIDTH,
+            variable=self.ui.is_invert_spec_var,
+        )
+        is_invert_spec_Option.grid()
+        self.ui.help_hints(is_invert_spec_Option, text=runtime.IS_INVERT_SPEC_HELP)
+
+        self.ui.vocal_splitter_Button_opt(demuc_opt, demucs_frame, width=runtime.VR_BUT_WIDTH, pady=runtime.MENU_PADDING_1)
+
+        self.ui.open_demucs_model_dir_Button = runtime.ttk.Button(
+            demucs_frame,
+            text=runtime.OPEN_MODELS_FOLDER_TEXT,
+            command=lambda: runtime.OPEN_FILE_func(runtime.DEMUCS_MODELS_DIR),
+            width=runtime.VR_BUT_WIDTH,
+        )
+        self.ui.open_demucs_model_dir_Button.grid(pady=runtime.MENU_PADDING_1)
+
+        self.ui.demucs_return_Button = runtime.ttk.Button(
+            demucs_frame,
+            text=runtime.BACK_TO_MAIN_MENU,
+            command=lambda: (
+                self.ui.menu_advanced_demucs_options_close_window(),
+                self.ui.check_is_menu_settings_open(),
+            ),
+        )
+        self.ui.demucs_return_Button.grid(pady=runtime.MENU_PADDING_1)
+
+        self.ui.demucs_close_Button = runtime.ttk.Button(
+            demucs_frame,
+            text=runtime.CLOSE_WINDOW,
+            command=lambda: self.ui.menu_advanced_demucs_options_close_window(),
+        )
+        self.ui.demucs_close_Button.grid(pady=runtime.MENU_PADDING_1)
+
+        self.ui.menu_placement(
+            demuc_opt,
+            runtime.ADVANCED_DEMUCS_OPTIONS_TEXT,
+            is_help_hints=True,
+            close_function=self.ui.menu_advanced_demucs_options_close_window,
+            frame_list=[demucs_pre_model_frame, demucs_frame],
+        )
+
+    def menu_advanced_mdx_options(self) -> None:
+        """Open advanced MDX options."""
+
+        mdx_net_opt = runtime.tk.Toplevel()
+
+        self.ui.is_open_menu_advanced_mdx_options.set(True)
+        self.ui.menu_advanced_mdx_options_close_window = lambda: (
+            self.ui.is_open_menu_advanced_mdx_options.set(False),
+            mdx_net_opt.destroy(),
+        )
+        mdx_net_opt.protocol("WM_DELETE_WINDOW", self.ui.menu_advanced_mdx_options_close_window)
+
+        tab1, tab3 = self.ui.menu_tab_control(mdx_net_opt, self.ui.mdx_secondary_model_vars, is_mdxnet=True)
+
+        mdx_net_frame = self.ui.menu_FRAME_SET(tab1)
+        mdx_net_frame.grid(pady=0)
+
+        mdx_net23_frame = self.ui.menu_FRAME_SET(tab3)
+        mdx_net23_frame.grid(pady=0)
+
+        self.ui.menu_title_LABEL_SET(mdx_net_frame, runtime.ADVANCED_MDXNET_OPTIONS_TEXT).grid(
+            pady=runtime.MENU_PADDING_1
+        )
+
+        compensate_Label = self.ui.menu_sub_LABEL_SET(mdx_net_frame, runtime.VOLUME_COMPENSATION_TEXT)
+        compensate_Label.grid(pady=runtime.MENU_PADDING_4)
+        runtime.ComboBoxEditableMenu(
+            mdx_net_frame,
+            values=runtime.VOL_COMPENSATION,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.compensate_var,
+            pattern=runtime.REG_COMPENSATION,
+            default=runtime.VOL_COMPENSATION,
+        ).grid(pady=runtime.MENU_PADDING_4)
+        self.ui.help_hints(compensate_Label, text=runtime.COMPENSATE_HELP)
+
+        mdx_segment_size_Label = self.ui.menu_sub_LABEL_SET(mdx_net_frame, runtime.SEGMENT_SIZE_TEXT)
+        mdx_segment_size_Label.grid(pady=runtime.MENU_PADDING_4)
+        runtime.ComboBoxEditableMenu(
+            mdx_net_frame,
+            values=runtime.MDX_SEGMENTS,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.mdx_segment_size_var,
+            pattern=runtime.REG_MDX_SEG,
+            default="256",
+        ).grid(pady=runtime.MENU_PADDING_4)
+        self.ui.help_hints(mdx_segment_size_Label, text=runtime.MDX_SEGMENT_SIZE_HELP)
+
+        overlap_mdx_Label = self.ui.menu_sub_LABEL_SET(mdx_net_frame, runtime.OVERLAP_TEXT)
+        overlap_mdx_Label.grid(pady=runtime.MENU_PADDING_4)
+        runtime.ComboBoxEditableMenu(
+            mdx_net_frame,
+            values=runtime.MDX_OVERLAP,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.overlap_mdx_var,
+            pattern=runtime.REG_OVERLAP,
+            default=runtime.MDX_OVERLAP,
+        ).grid(pady=runtime.MENU_PADDING_4)
+        self.ui.help_hints(overlap_mdx_Label, text=runtime.OVERLAP_HELP)
+
+        pitch_shift_Label = self.ui.menu_sub_LABEL_SET(mdx_net_frame, runtime.SHIFT_CONVERSION_PITCH_TEXT)
+        pitch_shift_Label.grid(pady=runtime.MENU_PADDING_4)
+        runtime.ComboBoxEditableMenu(
+            mdx_net_frame,
+            values=runtime.SEMITONE_SEL,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.semitone_shift_var,
+            pattern=runtime.REG_SEMITONES,
+            default=runtime.SEMI_DEF,
+        ).grid(pady=runtime.MENU_PADDING_4)
+        self.ui.help_hints(pitch_shift_Label, text=runtime.PITCH_SHIFT_HELP)
+
+        if not runtime.os.path.isfile(runtime.DENOISER_MODEL_PATH):
+            denoise_options_var_text = self.ui.denoise_option_var.get()
+            denoise_options = [option for option in runtime.MDX_DENOISE_OPTION if option != runtime.DENOISE_M]
+            self.ui.denoise_option_var.set(
+                runtime.DENOISE_S if denoise_options_var_text == runtime.DENOISE_M else denoise_options_var_text
+            )
+        else:
+            denoise_options = runtime.MDX_DENOISE_OPTION
+
+        denoise_option_Label = self.ui.menu_sub_LABEL_SET(mdx_net_frame, runtime.DENOISE_OUTPUT_TEXT)
+        denoise_option_Label.grid(pady=runtime.MENU_PADDING_4)
+        runtime.ComboBoxMenu(
+            mdx_net_frame,
+            textvariable=self.ui.denoise_option_var,
+            values=denoise_options,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+        ).grid(pady=runtime.MENU_PADDING_4)
+        self.ui.help_hints(denoise_option_Label, text=runtime.IS_DENOISE_HELP)
+
+        is_match_frequency_pitch_Option = runtime.ttk.Checkbutton(
+            mdx_net_frame,
+            text=runtime.MATCH_FREQ_CUTOFF_TEXT,
+            width=runtime.MDX_CHECKBOXS_WIDTH,
+            variable=self.ui.is_match_frequency_pitch_var,
+        )
+        is_match_frequency_pitch_Option.grid(pady=0)
+        self.ui.help_hints(is_match_frequency_pitch_Option, text=runtime.IS_FREQUENCY_MATCH_HELP)
+
+        is_invert_spec_Option = runtime.ttk.Checkbutton(
+            mdx_net_frame,
+            text=runtime.SPECTRAL_INVERSION_TEXT,
+            width=runtime.MDX_CHECKBOXS_WIDTH,
+            variable=self.ui.is_invert_spec_var,
+        )
+        is_invert_spec_Option.grid(pady=0)
+        self.ui.help_hints(is_invert_spec_Option, text=runtime.IS_INVERT_SPEC_HELP)
+
+        self.ui.vocal_splitter_Button_opt(mdx_net_opt, mdx_net_frame, pady=runtime.MENU_PADDING_1, width=runtime.VR_BUT_WIDTH)
+
+        clear_mdx_cache_Button = runtime.ttk.Button(
+            mdx_net_frame,
+            text=runtime.CLEAR_AUTOSET_CACHE_TEXT,
+            command=lambda: self.ui.clear_cache(runtime.MDX_ARCH_TYPE),
+            width=runtime.VR_BUT_WIDTH,
+        )
+        clear_mdx_cache_Button.grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(clear_mdx_cache_Button, text=runtime.CLEAR_CACHE_HELP)
+
+        runtime.ttk.Button(
+            mdx_net_frame,
+            text=runtime.OPEN_MODELS_FOLDER_TEXT,
+            command=lambda: runtime.OPEN_FILE_func(runtime.MDX_MODELS_DIR),
+            width=runtime.VR_BUT_WIDTH,
+        ).grid(pady=runtime.MENU_PADDING_1)
+
+        runtime.ttk.Button(
+            mdx_net_frame,
+            text=runtime.BACK_TO_MAIN_MENU,
+            command=lambda: (
+                self.ui.menu_advanced_mdx_options_close_window(),
+                self.ui.check_is_menu_settings_open(),
+            ),
+        ).grid(pady=runtime.MENU_PADDING_1)
+
+        runtime.ttk.Button(
+            mdx_net_frame,
+            text=runtime.CLOSE_WINDOW,
+            command=lambda: self.ui.menu_advanced_mdx_options_close_window(),
+        ).grid(pady=runtime.MENU_PADDING_1)
+
+        self.ui.menu_title_LABEL_SET(mdx_net23_frame, runtime.ADVANCED_MDXNET23_OPTIONS_TEXT).grid(
+            pady=runtime.MENU_PADDING_2
+        )
+
+        mdx_batch_size_Label = self.ui.menu_sub_LABEL_SET(mdx_net23_frame, runtime.BATCH_SIZE_TEXT)
+        mdx_batch_size_Label.grid(pady=runtime.MENU_PADDING_1)
+        runtime.ComboBoxEditableMenu(
+            mdx_net23_frame,
+            values=runtime.BATCH_SIZE,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.mdx_batch_size_var,
+            pattern=runtime.REG_BATCHES,
+            default=runtime.BATCH_SIZE,
+        ).grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(mdx_batch_size_Label, text=runtime.BATCH_SIZE_HELP)
+
+        overlap_mdx23_Label = self.ui.menu_sub_LABEL_SET(mdx_net23_frame, runtime.OVERLAP_TEXT)
+        overlap_mdx23_Label.grid(pady=runtime.MENU_PADDING_1)
+        runtime.ComboBoxEditableMenu(
+            mdx_net23_frame,
+            values=runtime.MDX23_OVERLAP,
+            width=runtime.MENU_COMBOBOX_WIDTH,
+            textvariable=self.ui.overlap_mdx23_var,
+            pattern=runtime.REG_OVERLAP23,
+            default="8",
+        ).grid(pady=runtime.MENU_PADDING_1)
+        self.ui.help_hints(overlap_mdx23_Label, text=runtime.OVERLAP_23_HELP)
+
+        is_mdx_c_seg_def_Option = runtime.ttk.Checkbutton(
+            mdx_net23_frame,
+            text=runtime.SEGMENT_DEFAULT_TEXT,
+            width=runtime.MDX_CHECKBOXS_WIDTH,
+            variable=self.ui.is_mdx_c_seg_def_var,
+        )
+        is_mdx_c_seg_def_Option.grid(pady=0)
+        self.ui.help_hints(is_mdx_c_seg_def_Option, text=runtime.IS_SEGMENT_DEFAULT_HELP)
+
+        is_mdx_combine_stems_Option = runtime.ttk.Checkbutton(
+            mdx_net23_frame,
+            text=runtime.COMBINE_STEMS_TEXT,
+            width=runtime.MDX_CHECKBOXS_WIDTH,
+            variable=self.ui.is_mdx23_combine_stems_var,
+        )
+        is_mdx_combine_stems_Option.grid()
+        self.ui.help_hints(is_mdx_combine_stems_Option, text=runtime.IS_DEMUCS_COMBINE_STEMS_HELP)
+
+        runtime.ttk.Button(
+            mdx_net23_frame,
+            text=runtime.CLOSE_WINDOW,
+            command=lambda: self.ui.menu_advanced_mdx_options_close_window(),
+        ).grid(pady=runtime.MENU_PADDING_2)
+
+        self.ui.menu_placement(
+            mdx_net_opt,
+            runtime.ADVANCED_MDXNET_OPTIONS_TEXT,
+            is_help_hints=True,
+            close_function=self.ui.menu_advanced_mdx_options_close_window,
+            frame_list=[mdx_net_frame, mdx_net23_frame],
+        )
+
     def menu_advanced_ensemble_options(self) -> None:
         """Open advanced ensemble options."""
 
