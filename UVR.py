@@ -63,6 +63,7 @@ from uvr.domain import audio_tools as audio_tools_module
 from uvr.domain import ensemble as ensemble_module
 from uvr.domain import model_data as model_data_module
 from uvr.services import processing as processing_service_module
+from uvr.ui import actions as ui_actions_module
 from uvr.ui import widgets as widgets_module
 from uvr.utils import system as system_helpers
 from uvr.utils import tk_helpers as tk_helpers_module
@@ -1683,6 +1684,9 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
     def processing_controller(self):
         return processing_service_module.ProcessingController(self)
+
+    def ui_actions(self):
+        return ui_actions_module.MainWindowActions(self)
     
     def assemble_model_data(self, model=None, arch_type=ENSEMBLE_MODE, is_dry_check=False, is_change_def=False, is_get_hash_dir_only=False):
 
@@ -5783,8 +5787,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         )
 
     def update_main_widget_states_mdx(self):
-        if not self.mdx_net_model_var.get() == DOWNLOAD_MORE:
-            self.update_main_widget_states()
+        self.ui_actions().update_main_widget_states_mdx()
 
     def move_widget_offscreen(self, widget, step=10):
         current_x = widget.winfo_x()
@@ -5795,444 +5798,69 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
     def update_main_widget_states(self):
         """Updates main widget states based on chosen process method"""
-
-        def place_widgets(*widgets):
-            for widget in widgets:
-                widget()
-
-        def general_shared_buttons():
-            place_widgets(self.is_gpu_conversion_Option_place, 
-                          self.model_sample_mode_Option_place)
-
-        def stem_save_options():
-            place_widgets(self.is_primary_stem_only_Option_place, 
-                          self.is_secondary_stem_only_Option_place)
-
-        def stem_save_demucs_options():
-            place_widgets(self.is_primary_stem_only_Demucs_Option_place, 
-                          self.is_secondary_stem_only_Demucs_Option_place)
-
-        def no_ensemble_shared():
-            place_widgets(self.save_current_settings_Label_place, 
-                          self.save_current_settings_Option_place)
-
-        process_method = self.chosen_process_method_var.get()
-        audio_tool = self.chosen_audio_tool_var.get()
-        
-        for widget in self.GUI_LIST:
-            widget.place(x=-1000, y=-1000)
-
-        if process_method == MDX_ARCH_TYPE:
-            place_widgets(self.mdx_net_model_Label_place, 
-                          self.mdx_net_model_Option_place, 
-                          general_shared_buttons, 
-                          stem_save_options, 
-                          no_ensemble_shared)
-        elif process_method == VR_ARCH_PM:
-            place_widgets(self.vr_model_Label_place, self.vr_model_Option_place, 
-                          self.aggression_setting_Label_place, 
-                          self.aggression_setting_Option_place, 
-                          self.window_size_Label_place, 
-                          self.window_size_Option_place, 
-                          general_shared_buttons, 
-                          stem_save_options, 
-                          no_ensemble_shared)
-        elif process_method == DEMUCS_ARCH_TYPE:
-            place_widgets(self.demucs_model_Label_place, 
-                          self.demucs_model_Option_place, 
-                          self.demucs_stems_Label_place, 
-                          self.demucs_stems_Option_place, 
-                          self.segment_Label_place, 
-                          self.segment_Option_place, 
-                          general_shared_buttons, 
-                          stem_save_demucs_options, 
-                          no_ensemble_shared)
-        elif process_method == AUDIO_TOOLS:
-            place_widgets(self.chosen_audio_tool_Label_place, 
-                          self.chosen_audio_tool_Option_place)
-
-            if audio_tool == ALIGN_INPUTS:
-                self.file_one_sub_var.set(FILE_ONE_MAIN_LABEL)
-                self.file_two_sub_var.set(FILE_TWO_MAIN_LABEL)
-            elif audio_tool == MATCH_INPUTS:
-                self.file_one_sub_var.set(FILE_ONE_MATCH_MAIN_LABEL)
-                self.file_two_sub_var.set(FILE_TWO_MATCH_MAIN_LABEL)
-
-            audio_tool_options = {
-                MANUAL_ENSEMBLE: [self.choose_algorithm_Label_place, 
-                                  self.choose_algorithm_Option_place,
-                                  self.is_wav_ensemble_Option_place],
-                TIME_STRETCH: [lambda: self.model_sample_mode_Option_place(rely=5), 
-                               self.time_stretch_rate_Label_place, 
-                               self.time_stretch_rate_Option_place],
-                CHANGE_PITCH: [self.is_time_correction_Option_place, 
-                               lambda: self.model_sample_mode_Option_place(rely=6), 
-                               self.pitch_rate_Label_place, 
-                               self.pitch_rate_Option_place],
-                ALIGN_INPUTS: [self.fileOne_Label_place, 
-                               self.fileOne_Entry_place, 
-                               self.fileTwo_Label_place, 
-                               self.fileTwo_Entry_place,
-                               self.fileOne_Open_place,
-                               self.fileTwo_Open_place,
-                               self.intro_analysis_Label_place, 
-                               self.intro_analysis_Option_place, 
-                               self.db_analysis_Label_place, 
-                               self.db_analysis_Option_place, 
-                               self.time_window_Label_place, 
-                               self.time_window_Option_place],
-                MATCH_INPUTS: [self.fileOne_Label_place, 
-                               self.fileOne_Entry_place, 
-                               self.fileTwo_Label_place, 
-                               self.fileTwo_Entry_place,
-                               self.fileOne_Open_place,
-                               self.fileTwo_Open_place,
-                               self.wav_type_set_Label_place,
-                               self.wav_type_set_Option_place],
-            }
-            place_widgets(*audio_tool_options.get(audio_tool, []))
-        elif process_method == ENSEMBLE_MODE:
-            place_widgets(self.chosen_ensemble_Label_place, 
-                          self.chosen_ensemble_Option_place, 
-                          self.ensemble_main_stem_Label_place, 
-                          self.ensemble_main_stem_Option_place, 
-                          self.ensemble_type_Label_place, 
-                          self.ensemble_type_Option_place, 
-                          self.ensemble_listbox_Label_place, 
-                          self.ensemble_listbox_Option_place, 
-                          self.ensemble_listbox_Option_pack, 
-                          general_shared_buttons, 
-                          stem_save_options)
-
-        if not self.is_gpu_available:
-            self.is_gpu_conversion_Disable()
-
-        self.update_inputPaths()
+        self.ui_actions().update_main_widget_states()
 
     def update_button_states(self):
         """Updates the available stems for selected Demucs model"""
-        
-        if self.chosen_process_method_var.get() == DEMUCS_ARCH_TYPE:
-            if self.demucs_stems_var.get() == ALL_STEMS:
-                self.update_stem_checkbox_labels(PRIMARY_STEM, demucs=True)
-            elif self.demucs_stems_var.get() == VOCAL_STEM:
-                self.update_stem_checkbox_labels(VOCAL_STEM, demucs=True, is_disable_demucs_boxes=False)
-                self.is_stem_only_Demucs_Options_Enable()
-            else:
-                self.is_stem_only_Demucs_Options_Enable()
-
-            #self.demucs_stems_Option['menu'].delete(0,'end')
-            
-            if not self.demucs_model_var.get() == CHOOSE_MODEL:
-                if DEMUCS_UVR_MODEL in self.demucs_model_var.get():
-                    stems = DEMUCS_2_STEM_OPTIONS
-                elif DEMUCS_6_STEM_MODEL in self.demucs_model_var.get():
-                    stems = DEMUCS_6_STEM_OPTIONS
-                else:
-                    stems = DEMUCS_4_STEM_OPTIONS
-
-                self.demucs_stems_Option['values'] = stems
-                self.demucs_stems_Option.command(lambda e:self.update_stem_checkbox_labels(self.demucs_stems_var.get(), demucs=True))
+        self.ui_actions().update_button_states()
 
     def update_button_states_mdx(self, model_stems):
         """Updates the available stems for selected Demucs model"""
-        
-        model_stems = [stem for stem in model_stems]
-        
-        if len(model_stems) >= 3:
-            model_stems.insert(0, ALL_STEMS)
-            self.mdxnet_stems_var.set(ALL_STEMS)
-        else:
-            self.mdxnet_stems_var.set(model_stems[0])
-        
-        if self.mdxnet_stems_var.get() == ALL_STEMS:
-            self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-        elif self.mdxnet_stems_var.get() == VOCAL_STEM:
-            self.update_stem_checkbox_labels(VOCAL_STEM)
-            self.is_stem_only_Options_Enable()
-        else:
-            self.is_stem_only_Options_Enable()
-
-        if not self.mdx_net_model_var.get() == CHOOSE_MODEL:
-            self.mdxnet_stems_Option['values'] = model_stems
-            self.mdxnet_stems_Option.command(lambda e:self.update_stem_checkbox_labels(self.mdxnet_stems_var.get()))
+        self.ui_actions().update_button_states_mdx(model_stems)
                             
     def update_stem_checkbox_labels(self, selection, demucs=False, disable_boxes=False, is_disable_demucs_boxes=True):
         """Updates the "save only" checkboxes based on the model selected"""
-        
-        stem_text = self.is_primary_stem_only_Text_var, self.is_secondary_stem_only_Text_var
-
-        if selection == ALL_STEMS:
-            selection = PRIMARY_STEM
-        else:
-            self.is_stem_only_Options_Enable()
-
-        if disable_boxes or selection == PRIMARY_STEM:
-            self.is_primary_stem_only_Option.configure(state=tk.DISABLED)
-            self.is_secondary_stem_only_Option.configure(state=tk.DISABLED)
-            self.is_primary_stem_only_var.set(False)
-            self.is_secondary_stem_only_var.set(False)
-        else:
-            self.is_primary_stem_only_Option.configure(state=tk.NORMAL)
-            self.is_secondary_stem_only_Option.configure(state=tk.NORMAL)
-        
-        if demucs:
-            stem_text = self.is_primary_stem_only_Demucs_Text_var, self.is_secondary_stem_only_Demucs_Text_var
-
-            if is_disable_demucs_boxes:
-                self.is_primary_stem_only_Demucs_Option.configure(state=tk.DISABLED)
-                self.is_secondary_stem_only_Demucs_Option.configure(state=tk.DISABLED)
-                self.is_primary_stem_only_Demucs_var.set(False)
-                self.is_secondary_stem_only_Demucs_var.set(False)
-                
-            if not selection == PRIMARY_STEM:
-                self.is_primary_stem_only_Demucs_Option.configure(state=tk.NORMAL)
-                self.is_secondary_stem_only_Demucs_Option.configure(state=tk.NORMAL)
-                
-        stem_text[0].set(f"{selection} Only")
-        stem_text[1].set(f"{secondary_stem(selection)} Only")
+        self.ui_actions().update_stem_checkbox_labels(selection, demucs, disable_boxes, is_disable_demucs_boxes)
      
     def update_ensemble_algorithm_menu(self, is_4_stem=False):
-        options = ENSEMBLE_TYPE_4_STEM if is_4_stem else ENSEMBLE_TYPE
-
-        if not "/" in self.ensemble_type_var.get() or is_4_stem: 
-            self.ensemble_type_var.set(options[0])
-
-        self.ensemble_type_Option["values"] = options
+        self.ui_actions().update_ensemble_algorithm_menu(is_4_stem)
 
     def selection_action(self, event, option_var, is_mdx_net=False):
-        selected_value = event.widget.get()
-        selected_value = CHOOSE_MODEL if selected_value == OPT_SEPARATOR else selected_value
-        option_var.set(selected_value)
-        if is_mdx_net:
-            self.update_main_widget_states_mdx()
-        self.selection_action_models(selected_value)
+        self.ui_actions().selection_action(event, option_var, is_mdx_net)
 
     def selection_action_models(self, selection):
         """Accepts model names and verifies their state."""
-
-        # Handle different selections.
-        if selection in CHOOSE_MODEL:
-            self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-        else:
-            self.is_stem_only_Options_Enable()
-
-        # Process method matching current selection.
-        self._handle_model_by_chosen_method(selection)
-
-        # Handle Ensemble mode case.
-        if self.chosen_process_method_var.get() == ENSEMBLE_MODE:
-            return self._handle_ensemble_mode_selection(selection)
-
-        if not self.is_menu_settings_open and selection == DOWNLOAD_MORE:
-            self.update_checkbox_text()
-            self.menu_settings(select_tab_3=True)
+        return self.ui_actions().selection_action_models(selection)
 
     def _handle_model_by_chosen_method(self, selection):
         """Handles model selection based on the currently chosen method."""
-        current_method = self.chosen_process_method_var.get()
-        model_var = self.method_mapper.get(current_method)
-        if model_var:
-            self.selection_action_models_sub(selection, current_method, model_var)
+        self.ui_actions()._handle_model_by_chosen_method(selection)
 
     def _handle_ensemble_mode_selection(self, selection):
         """Handles the case where the current method is 'ENSEMBLE_MODE'."""
-        model_data = self.assemble_model_data(selection, ENSEMBLE_CHECK)[0]
-        if not model_data.model_status:
-            return self.model_stems_list.index(selection)
-        return False
+        return self.ui_actions()._handle_ensemble_mode_selection(selection)
 
     def selection_action_models_sub(self, selection, ai_type, var: tk.StringVar):
         """Takes input directly from the selection_action_models parent function"""
-
-        if selection == DOWNLOAD_MORE:
-            is_model_status = False
-        else:
-            model_data = self.assemble_model_data(selection, ai_type)[0]
-            is_model_status = model_data.model_status
-
-        if not is_model_status:
-            var.set(CHOOSE_MODEL)
-            if ai_type == MDX_ARCH_TYPE:
-                self.mdx_segment_size_Label_place()
-                self.mdx_segment_size_Option_place()
-                self.overlap_mdx_Label_place()
-                self.overlap_mdx_Option_place()
-                self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-        else:
-            if ai_type == DEMUCS_ARCH_TYPE:
-                if not self.demucs_stems_var.get().lower() in model_data.demucs_source_list:
-                    self.demucs_stems_var.set(ALL_STEMS if model_data.demucs_stem_count == 4 else VOCAL_STEM)
-                    
-                self.update_button_states()
-            else:
-                if model_data.is_mdx_c and len(model_data.mdx_model_stems) >= 1:
-                    if len(model_data.mdx_model_stems) >= 3:
-                        self.mdxnet_stems_Label_place()
-                        self.mdxnet_stems_Option_place()
-                    else:
-                        self.mdx_segment_size_Label_place()
-                        self.mdx_segment_size_Option_place()
-                    self.overlap_mdx_Label_place()
-                    self.overlap_mdx23_Option_place()
-                    self.update_button_states_mdx(model_data.mdx_model_stems)
-                else:
-                    if ai_type == MDX_ARCH_TYPE:
-                        self.mdx_segment_size_Label_place()
-                        self.mdx_segment_size_Option_place()
-                        self.overlap_mdx_Label_place()
-                        self.overlap_mdx_Option_place()
-
-                    stem = model_data.primary_stem
-                    self.update_stem_checkbox_labels(stem)
+        self.ui_actions().selection_action_models_sub(selection, ai_type, var)
 
     def selection_action_process_method(self, selection, from_widget=False, is_from_conv_menu=False):
         """Checks model and variable status when toggling between process methods"""
-        
-        if is_from_conv_menu:
-            self.update_main_widget_states()
-
-        if from_widget:
-            self.save_current_settings_var.set(CHOOSE_ENSEMBLE_OPTION)
-
-        if selection == ENSEMBLE_MODE:
-            ensemble_choice = self.ensemble_main_stem_var.get()
-            if ensemble_choice in [CHOOSE_STEM_PAIR, FOUR_STEM_ENSEMBLE, MULTI_STEM_ENSEMBLE]:
-                self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-            else:
-                self.update_stem_checkbox_labels(self.return_ensemble_stems(is_primary=True))
-                self.is_stem_only_Options_Enable()
-            return
-
-        for method_type, model_var in self.method_mapper.items():
-            if method_type in selection:
-                self.selection_action_models(model_var.get())
-                break
+        self.ui_actions().selection_action_process_method(selection, from_widget, is_from_conv_menu)
 
     def selection_action_chosen_ensemble(self, selection):
         """Activates specific actions depending on selected ensemble option"""
-        
-        if selection not in ENSEMBLE_OPTIONS:
-            self.selection_action_chosen_ensemble_load_saved(selection)
-        elif selection == SAVE_ENSEMBLE: 
-            self.chosen_ensemble_var.set(CHOOSE_ENSEMBLE_OPTION)
-            self.pop_up_save_ensemble()
-        elif selection == OPT_SEPARATOR_SAVE:
-            self.chosen_ensemble_var.set(CHOOSE_ENSEMBLE_OPTION)
-        elif selection == CLEAR_ENSEMBLE:
-            self.ensemble_listbox_Option.selection_clear(0, 'end') 
-            self.chosen_ensemble_var.set(CHOOSE_ENSEMBLE_OPTION)
+        self.ui_actions().selection_action_chosen_ensemble(selection)
            
     def selection_action_chosen_ensemble_load_saved(self, saved_ensemble):
         """Loads the data from selected saved ensemble"""
-        
-        saved_data = None
-        saved_ensemble = saved_ensemble.replace(" ", "_")
-        saved_ensemble_path = os.path.join(ENSEMBLE_CACHE_DIR, f'{saved_ensemble}.json')
-
-        if os.path.isfile(saved_ensemble_path):
-            saved_data = json.load(open(saved_ensemble_path))
-            
-        if saved_data:
-            self.selection_action_ensemble_stems(saved_data['ensemble_main_stem'], from_menu=False)
-            self.ensemble_main_stem_var.set(saved_data['ensemble_main_stem'])
-            self.ensemble_type_var.set(saved_data['ensemble_type'])
-            self.saved_model_list = saved_data['selected_models']
-        
-            for saved_model in self.saved_model_list:         
-                status = self.assemble_model_data(saved_model, ENSEMBLE_CHECK)[0].model_status
-                if not status:
-                    self.saved_model_list.remove(saved_model)
-            
-            indexes = self.ensemble_listbox_get_indexes_for_files(self.model_stems_list, self.saved_model_list)
-            
-            for i in indexes:
-                self.ensemble_listbox_Option.selection_set(i)
-                
-        self.update_checkbox_text()
+        self.ui_actions().selection_action_chosen_ensemble_load_saved(saved_ensemble)
             
     def selection_action_ensemble_stems(self, selection: str, from_menu=True, auto_update=None):
         """Filters out all models from ensemble listbox that are incompatible with selected ensemble stem"""
-        
-        is_multi_stem = False
-        
-        if not selection == CHOOSE_STEM_PAIR:
-            if selection in [FOUR_STEM_ENSEMBLE, MULTI_STEM_ENSEMBLE]:
-                self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-                self.update_ensemble_algorithm_menu(is_4_stem=True)
-                self.ensemble_primary_stem = PRIMARY_STEM
-                self.ensemble_secondary_stem = SECONDARY_STEM
-                is_4_stem_check = True
-                if selection == MULTI_STEM_ENSEMBLE:
-                    is_multi_stem = True
-            else:
-                self.update_ensemble_algorithm_menu()
-                self.is_stem_only_Options_Enable()
-                stems = selection.partition("/")
-                self.update_stem_checkbox_labels(stems[0])
-                self.ensemble_primary_stem = stems[0]
-                self.ensemble_secondary_stem = stems[2]
-                is_4_stem_check = False
-            
-            self.model_stems_list = self.model_list(self.ensemble_primary_stem, self.ensemble_secondary_stem, is_4_stem_check=is_4_stem_check, is_multi_stem=is_multi_stem)
-            self.ensemble_listbox_Option.configure(state=tk.NORMAL)
-            self.ensemble_listbox_clear_and_insert_new(self.model_stems_list)
-
-            if auto_update:
-                indexes = self.ensemble_listbox_get_indexes_for_files(self.model_stems_list, auto_update)
-                self.ensemble_listbox_select_from_indexs(indexes)
-        else:
-            self.ensemble_listbox_Option.configure(state=tk.DISABLED)
-            self.update_stem_checkbox_labels(PRIMARY_STEM, disable_boxes=True)
-            self.model_stems_list = ()
-                
-        if from_menu:
-            self.chosen_ensemble_var.set(CHOOSE_ENSEMBLE_OPTION)
+        self.ui_actions().selection_action_ensemble_stems(selection, from_menu, auto_update)
 
     def selection_action_saved_settings(self, selection, process_method=None):
         """Activates specific action based on the selected settings from the saved settings selections"""
-
-        if self.thread_check(self.active_processing_thread):
-            self.error_dialoge(SET_TO_ANY_PROCESS_ERROR)
-            return
-
-        chosen_process_method = self.chosen_process_method_var.get() 
-        if process_method:
-            chosen_process_method = process_method
-
-        if selection in SAVE_SET_OPTIONS:
-            self.handle_special_options(selection, chosen_process_method)
-        else:
-            self.handle_saved_settings(selection, chosen_process_method)
-
-        self.update_checkbox_text()
+        self.ui_actions().selection_action_saved_settings(selection, process_method)
 
     def handle_special_options(self, selection, process_method):
         """Handles actions for special options."""
-
-        if selection == SAVE_SETTINGS: 
-            self.save_current_settings_var.set(SELECT_SAVED_SET)
-            self.pop_up_save_current_settings()
-
-        elif selection == RESET_TO_DEFAULT:
-            self.save_current_settings_var.set(SELECT_SAVED_SET)
-            self.load_saved_settings(DEFAULT_DATA, process_method)
-
-        elif selection == OPT_SEPARATOR_SAVE:
-            self.save_current_settings_var.set(SELECT_SAVED_SET)
+        self.ui_actions().handle_special_options(selection, process_method)
 
     def handle_saved_settings(self, selection, process_method):
         """Handles actions for saved settings."""
-
-        selection = selection.replace(" ", "_")
-        saved_ensemble_path = os.path.join(SETTINGS_CACHE_DIR, f'{selection}.json')
-
-        if os.path.isfile(saved_ensemble_path):
-            with open(saved_ensemble_path, 'r') as file:
-                saved_data = json.load(file)
-            
-            if saved_data:
-                self.load_saved_settings(saved_data, process_method)
+        self.ui_actions().handle_saved_settings(selection, process_method)
 
     #--Processing Methods-- 
 
@@ -6917,6 +6545,7 @@ system_helpers.configure_runtime(sys.modules[__name__])
 tk_helpers_module.configure_runtime(sys.modules[__name__])
 model_data_module.configure_runtime(sys.modules[__name__])
 processing_service_module.configure_runtime(sys.modules[__name__])
+ui_actions_module.configure_runtime(sys.modules[__name__])
 ensemble_module.configure_runtime(sys.modules[__name__])
 audio_tools_module.configure_runtime(sys.modules[__name__])
 widgets_module.configure_runtime(sys.modules[__name__])
