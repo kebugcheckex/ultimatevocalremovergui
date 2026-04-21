@@ -254,36 +254,6 @@ class AppState:
         payload.update(self.models.secondary_models)
         return payload
 
-
-@dataclass(frozen=True)
-class ProcessingRequest:
-    """Typed processing request consumed by the future Qt processing facade."""
-
-    process_method: str
-    audio_tool: str
-    algorithm: str
-    input_paths: tuple[str, ...]
-    export_path: str
-    models: ModelSelectionState
-    output: OutputSettingsState
-    options: ProcessingSettingsState
-    extra_settings: Mapping[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_app_state(cls, state: AppState) -> ProcessingRequest:
-        return cls(
-            process_method=state.processing.process_method,
-            audio_tool=state.processing.audio_tool,
-            algorithm=state.processing.algorithm,
-            input_paths=state.paths.input_paths,
-            export_path=state.paths.export_path,
-            models=state.models,
-            output=state.output,
-            options=state.processing,
-            extra_settings=dict(state.extra_settings),
-        )
-
-
 def load_app_state(data_file: str | Path = "data.pkl") -> AppState:
     """Load persisted settings into the new Qt state model."""
     settings = load_settings(default_data=DEFAULT_DATA, data_file=data_file)

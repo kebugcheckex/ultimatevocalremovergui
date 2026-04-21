@@ -5,20 +5,19 @@ from uvr_qt.state.app_state import (
     ModelSelectionState,
     OutputSettingsState,
     PathsState,
-    ProcessingRequest,
     ProcessingRuntimeState,
     ProcessingSettingsState,
     load_app_state,
 )
+from uvr_core.requests import SeparationRequest
 
 __all__ = [
     "AppState",
     "ModelSelectionState",
     "OutputSettingsState",
     "PathsState",
-    "ProcessingRequest",
+    "SeparationRequest",
     "ProcessingRuntimeState",
     "ProcessingSettingsState",
     "load_app_state",
 ]
-
