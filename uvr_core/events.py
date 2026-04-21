@@ -48,4 +48,16 @@ class ResultEvent:
         return asdict(self)
 
 
-Event = Union[LogEvent, StatusEvent, ProgressEvent, ResultEvent]
+@dataclass(frozen=True)
+class DownloadResultEvent:
+    completed_files: tuple[str, ...]
+    skipped_existing: tuple[str, ...]
+    model_type: str
+    selection: str
+    event_type: str = "download_result"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+Event = Union[LogEvent, StatusEvent, ProgressEvent, ResultEvent, DownloadResultEvent]

@@ -40,15 +40,17 @@ uvr_web/                 # future; not in scope
 UVR.py                   # legacy Tk; retired after Qt parity reached
 ```
 
-Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_core/`. Anything toolkit-specific sits under `uvr_qt/` / `uvr_cli/`. The current `uvr_qt/services/processing_facade.py` is a good first draft of `uvr_core` but needs to move out of `uvr_qt/`.
+Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_core/`. Anything toolkit-specific sits under `uvr_qt/` / `uvr_cli/`. That boundary now exists in code: `uvr_qt/services/processing_facade.py` is a thin Qt adapter over `uvr_core`, and `uvr_cli/` consumes `uvr_core` directly.
 
 ## Current Status Snapshot
 
-- `uvr/config/`, `uvr/domain/`, and `uvr/services/processing.py` exist and are in active use from `UVR.py`.
-- `ProcessingController` still depends on the `MainWindow` UI surface (see `uvr-py-refactor-plan.md` §Pre-PySide6 Stabilization Pass).
-- `uvr_qt/services/processing_facade.py` provides a framework-neutral `.process(state, log, progress, status)` entry point — this is the seam both Qt and CLI currently use.
-- `uvr_cli/` exists with click-based `list-methods`, `list-models`, `separate` commands driven by that facade.
-- Downloads, cache, ensemble orchestration, and audio-tool flows are still `UVR.py`-bound.
+- `uvr/config/`, `uvr/domain/`, `uvr/services/processing.py`, `uvr/services/catalog.py`, `uvr/services/cache.py`, and `uvr/services/downloads.py` exist.
+- `uvr_core/` exists with typed requests, typed events, `SeparationJob`, and `DownloadJob`.
+- `uvr/runtime.py` owns backend runtime/bootstrap and path configuration, with env-var overrides for model/base paths.
+- `uvr_qt/services/processing_facade.py` is now a Qt adapter over `uvr_core`, and `AppState` derives a backend `SeparationRequest`.
+- `uvr_cli/` imports from `uvr_core`/`uvr` rather than `uvr_qt`, and real CLI smoke separation has run successfully against a local model.
+- `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
+- Downloads, cache, and model catalog are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state and remains the runtime shell for many non-separation workflows.
 
 ## Roadmap
 
@@ -62,9 +64,9 @@ The phases below are ordered by dependency, not by calendar. Each phase has an e
 - First Qt shell + processing façade.
 - CLI skeleton (`uvr_cli/`) covering single-model separation.
 
-**Exit:** the Tk app still runs and a CLI smoke-separation works through the façade. (Current state.)
+**Exit:** the Tk app still runs and a CLI smoke-separation works through the façade. (Done.)
 
-### Phase 1 — Promote the façade to `uvr_core/`
+### Phase 1 — Promote the façade to `uvr_core/` (done)
 
 Move the framework-neutral boundary out from under `uvr_qt/` so the CLI doesn't depend on a Qt package.
 
@@ -74,9 +76,9 @@ Move the framework-neutral boundary out from under `uvr_qt/` so the CLI doesn't 
 - Move `runtime_bridge.configure_backend_runtime()` into `uvr/runtime.py` so neither adapter owns it.
 - Split `AppState` into two things: a frontend-owned view model (`uvr_qt/state/`) and a backend request (`uvr_core.requests.SeparationRequest`). The CLI constructs requests directly; the Qt app derives them from `AppState`.
 
-**Exit:** `uvr_cli` imports nothing from `uvr_qt`; `uvr_qt` imports nothing from `uvr_cli`; both import from `uvr_core` and `uvr/`.
+**Exit:** `uvr_cli` imports nothing from `uvr_qt`; `uvr_qt` imports nothing from `uvr_cli`; both import from `uvr_core` and `uvr/`. (Done.)
 
-### Phase 2 — Extract remaining services from `UVR.py`
+### Phase 2 — Extract remaining services from `UVR.py` (done)
 
 The Tk app still holds three capabilities the Qt/CLI adapters need:
 
@@ -86,7 +88,15 @@ The Tk app still holds three capabilities the Qt/CLI adapters need:
 
 Each service gets a typed interface and no Tk imports. `UVR.py` switches to delegating into them; `uvr_core` wraps them in job types where needed (`DownloadJob`, etc.).
 
-**Exit:** the three services are reachable from a headless Python session without importing `UVR.py`.
+Current progress:
+
+- `uvr/services/catalog.py` exists and is used by `uvr_core.jobs.SeparationJob` for installed-model discovery and name mapping.
+- `uvr/services/cache.py` exists and is used by `uvr_core.jobs.SeparationJob` for cached-source callbacks.
+- `uvr/services/downloads.py` exists and covers online metadata refresh, VIP validation, download catalog building, download plan resolution, model-settings refresh, and file download execution.
+- `uvr_core.jobs.DownloadJob` now exposes a headless download surface with typed requests/results and event-based progress, so adapters can consume downloads without importing `UVR.py`.
+- `UVR.py` now delegates backend download logic into `uvr/services/downloads.py`, but still owns Tk thread management, button state, and popup/menu orchestration for downloads.
+
+**Exit:** the three services are reachable from a headless Python session without importing `UVR.py`. (Done.)
 
 ### Phase 3 — CLI parity with "mainstream" workflows
 
@@ -140,7 +150,7 @@ Not implemented in this project, but the architecture should support it triviall
 
 ## Sequencing Rationale
 
-- **Phases 1 and 2 are prerequisites for everything else.** Until the façade lives in `uvr_core/` and downloads/cache/catalog are extracted, every Qt or CLI feature accrues a backend debt.
+- **Phases 1 and 2 are prerequisites for everything else.** Phase 1 is now complete. Phase 2 is partially complete via extracted catalog/cache/download services, but download job wiring and remaining Tk-era orchestration still need to move before the backend boundary is fully settled.
 - **Phase 3 before Phase 4.** The CLI is the cheapest way to stress the backend boundary. Bugs found while wiring the CLI are bugs the Qt frontend would have hit too, found without Qt-specific noise.
 - **Phases 4 and 5 can overlap** once Phase 3 has validated the event/request surface.
 - **Phase 6 is gated on Phase 5.** Do not delete `UVR.py` until the Qt app covers the flows its users depend on.

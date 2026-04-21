@@ -23,7 +23,6 @@ import soundfile as sf
 import torch
 import urllib.request
 import webbrowser
-import wget
 import traceback
 import matchering as match
 import tkinter as tk
@@ -66,6 +65,7 @@ from uvr.config import persistence as persistence_helpers
 from uvr.domain import audio_tools as audio_tools_module
 from uvr.domain import ensemble as ensemble_module
 from uvr.domain import model_data as model_data_module
+from uvr.services import downloads as downloads_service_module
 from uvr.services import processing as processing_service_module
 from uvr.ui import actions as ui_actions_module
 from uvr.ui import file_inputs as ui_file_inputs_module
@@ -4036,12 +4036,12 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
 
             is_new_update = False
             try:
-                self.online_data = json.load(urllib.request.urlopen(DOWNLOAD_CHECKS))
+                online_state = downloads_service_module.fetch_online_state()
+                self.online_data = online_state.payload
                 self.is_online = True
 
                 try:
-                    with urllib.request.urlopen(BULLETIN_CHECK) as response:
-                        self.bulletin_data = response.read().decode('utf-8')
+                    self.bulletin_data = online_state.bulletin or INFO_UNAVAILABLE_TEXT
 
                     if not is_windows:
                         self.bulletin_data = read_bulliten_text_mac(CR_TEXT, self.bulletin_data)
@@ -4141,7 +4141,7 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
     def download_validate_code(self, confirm=False, code_message=None):
         """Verifies the VIP download code"""
         
-        self.decoded_vip_link = vip_downloads(self.user_code_var.get())
+        self.decoded_vip_link = downloads_service_module.validate_vip_code(self.user_code_var.get())
         
         if confirm:
             if not self.decoded_vip_link == NO_CODE:
@@ -4168,15 +4168,13 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         model_download_vr_list, model_download_vr_name = [], "vrdownload"
         model_download_demucs_list, model_download_demucs_name = [], "demucsmdxdownload"
 
-        self.vr_download_list = self.online_data["vr_download_list"]
-        self.mdx_download_list = self.online_data["mdx_download_list"]
-        self.demucs_download_list = self.online_data["demucs_download_list"]
-        self.mdx_download_list.update(self.online_data["mdx23c_download_list"])
-        
-        if not self.decoded_vip_link is NO_CODE:
-            self.vr_download_list.update(self.online_data["vr_download_vip_list"])
-            self.mdx_download_list.update(self.online_data["mdx_download_vip_list"])
-            self.mdx_download_list.update(self.online_data["mdx23c_download_vip_list"])
+        download_catalog = downloads_service_module.build_download_catalog(
+            self.online_data,
+            decoded_vip_link=self.decoded_vip_link,
+        )
+        self.vr_download_list = download_catalog.vr_download_list
+        self.mdx_download_list = download_catalog.mdx_download_list
+        self.demucs_download_list = download_catalog.demucs_download_list
                      
         def configure_combobox(combobox:ComboBoxMenu, values:list, variable:tk.StringVar, arch_type, name):
             values = [NO_NEW_MODELS] if not values else values
@@ -4185,78 +4183,27 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
                                           command=lambda s: self.download_model_select(variable.get(), arch_type, variable))
                                      
         if model_type in [VR_ARCH_TYPE, ALL_TYPES]:
-            for (selectable, model) in self.vr_download_list.items():
-                if not os.path.isfile(os.path.join(VR_MODELS_DIR, model)):
-                    model_download_vr_list.append(selectable)
-                    
+            model_download_vr_list = downloads_service_module.list_downloadable_items(download_catalog, VR_ARCH_TYPE)
             configure_combobox(self.model_download_vr_Option, model_download_vr_list, self.model_download_vr_var, VR_ARCH_TYPE, model_download_vr_name)
 
         if model_type in [MDX_ARCH_TYPE, ALL_TYPES]:
-            for (selectable, model) in self.mdx_download_list.items():
-                if isinstance(model, dict):
-                    items_list = list(model.items())
-                    model_name, config = items_list[0]
-                    config_link = f"{MDX23_CONFIG_CHECKS}{config}"
-                    config_local = os.path.join(MDX_C_CONFIG_PATH, config)
-                    if not os.path.isfile(config_local):
-                        with urllib.request.urlopen(config_link) as response:
-                            with open(config_local, 'wb') as out_file:
-                                out_file.write(response.read())
-                else:
-                    model_name = str(model)
-
-                if not os.path.isfile(os.path.join(MDX_MODELS_DIR, model_name)):
-                    model_download_mdx_list.append(selectable)
-                    
+            model_download_mdx_list = downloads_service_module.list_downloadable_items(download_catalog, MDX_ARCH_TYPE)
             configure_combobox(self.model_download_mdx_Option, model_download_mdx_list, self.model_download_mdx_var, MDX_ARCH_TYPE, model_download_mdx_name)
 
         if model_type in [DEMUCS_ARCH_TYPE, ALL_TYPES]:
-            for (selectable, model) in self.demucs_download_list.items():  
-                for name in model.items():
-                    if [True for x in DEMUCS_NEWER_ARCH_TYPES if x in selectable]:
-                        if not os.path.isfile(os.path.join(DEMUCS_NEWER_REPO_DIR, name[0])):
-                            self.download_demucs_models_list.append(selectable)
-                    else:
-                        if not os.path.isfile(os.path.join(DEMUCS_MODELS_DIR, name[0])):
-                            self.download_demucs_models_list.append(selectable)
-                        
-            self.download_demucs_models_list = list(dict.fromkeys(self.download_demucs_models_list)) 
-        
-            for option_name in self.download_demucs_models_list:
-                model_download_demucs_list.append(option_name)
-            
+            model_download_demucs_list = downloads_service_module.list_downloadable_items(download_catalog, DEMUCS_ARCH_TYPE)
             configure_combobox(self.model_download_demucs_Option, model_download_demucs_list, self.model_download_demucs_var, DEMUCS_ARCH_TYPE, model_download_demucs_name)
 
     def download_model_settings(self):
         '''Update the newest model settings'''
         
         try:
-            self.vr_hash_MAPPER = json.load(urllib.request.urlopen(VR_MODEL_DATA_LINK))
-            self.mdx_hash_MAPPER = json.load(urllib.request.urlopen(MDX_MODEL_DATA_LINK))
-            self.mdx_name_select_MAPPER = json.load(urllib.request.urlopen(MDX_MODEL_NAME_DATA_LINK))
-            self.demucs_name_select_MAPPER = json.load(urllib.request.urlopen(DEMUCS_MODEL_NAME_DATA_LINK))
-            
-            vr_hash_MAPPER_dump = json.dumps(self.vr_hash_MAPPER, indent=4)
-            with open(VR_HASH_JSON, "w") as outfile:
-                outfile.write(vr_hash_MAPPER_dump)
-                
-            mdx_hash_MAPPER_dump = json.dumps(self.mdx_hash_MAPPER, indent=4)
-            with open(MDX_HASH_JSON, "w") as outfile:
-                outfile.write(mdx_hash_MAPPER_dump)
-
-            mdx_name_select_MAPPER_dump = json.dumps(self.mdx_name_select_MAPPER, indent=4)
-            with open(MDX_MODEL_NAME_SELECT, "w") as outfile:
-                outfile.write(mdx_name_select_MAPPER_dump)
-                
-            demucs_name_select_MAPPER_dump = json.dumps(self.demucs_name_select_MAPPER, indent=4)
-            with open(DEMUCS_MODEL_NAME_SELECT, "w") as outfile:
-                outfile.write(demucs_name_select_MAPPER_dump)
-
+            bundle = downloads_service_module.load_or_fetch_model_settings()
+            self.vr_hash_MAPPER = bundle.vr_hash_mapper
+            self.mdx_hash_MAPPER = bundle.mdx_hash_mapper
+            self.mdx_name_select_MAPPER = bundle.mdx_name_select_mapper
+            self.demucs_name_select_MAPPER = bundle.demucs_name_select_mapper
         except Exception as e:
-            self.vr_hash_MAPPER = load_model_hash_data(VR_HASH_JSON)
-            self.mdx_hash_MAPPER = load_model_hash_data(MDX_HASH_JSON)
-            self.mdx_name_select_MAPPER = load_model_hash_data(MDX_MODEL_NAME_SELECT)
-            self.demucs_name_select_MAPPER = load_model_hash_data(DEMUCS_MODEL_NAME_SELECT)
             self.error_log_var.set(e)
             print(e)
 
@@ -4297,41 +4244,33 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         """Prepares the data needed to download selected model."""
         
         self.download_demucs_newer_models.clear()
+        self.current_download_plan = None
 
         if selection == NO_NEW_MODELS:
             selection = NO_MODEL
             var.set(NO_MODEL)
-        
-        model_repo = self.decoded_vip_link if VIP_SELECTION in selection else NORMAL_REPO
-        is_demucs_newer = [True for x in DEMUCS_NEWER_ARCH_TYPES if x in selection]
+            return
 
-        if type == VR_ARCH_TYPE:
-            for selected_model in self.vr_download_list.items():
-                if selection in selected_model:
-                    self.download_link_path_var.set("{}{}".format(model_repo, selected_model[1]))
-                    self.download_save_path_var.set(os.path.join(VR_MODELS_DIR, selected_model[1]))
-                    break
-                
-        if type == MDX_ARCH_TYPE:
-            for selected_model in self.mdx_download_list.items():
-                if selection in selected_model:
-                    if isinstance(selected_model[1], dict):
-                        model_name = list(selected_model[1].keys())[0]
-                    else:
-                        model_name = str(selected_model[1])
-                    self.download_link_path_var.set("{}{}".format(model_repo, model_name))
-                    self.download_save_path_var.set(os.path.join(MDX_MODELS_DIR, model_name))
-                    break
+        try:
+            download_catalog = downloads_service_module.build_download_catalog(
+                self.online_data,
+                decoded_vip_link=self.decoded_vip_link,
+            )
+            plan = downloads_service_module.resolve_download_plan(
+                selection,
+                type,
+                download_catalog,
+                decoded_vip_link=self.decoded_vip_link,
+            )
+            self.current_download_plan = plan
 
-        if type == DEMUCS_ARCH_TYPE:
-            for selected_model, model_data in self.demucs_download_list.items():
-                if selection == selected_model:
-                    for key, value in model_data.items():
-                        if is_demucs_newer:
-                            self.download_demucs_newer_models.append([os.path.join(DEMUCS_NEWER_REPO_DIR, key), value])
-                        else:
-                            self.download_save_path_var.set(os.path.join(DEMUCS_MODELS_DIR, key))
-                            self.download_link_path_var.set(value)
+            if plan.tasks:
+                self.download_link_path_var.set(str(plan.tasks[0].url))
+                self.download_save_path_var.set(str(plan.tasks[0].destination))
+            for task in plan.tasks[1:]:
+                self.download_demucs_newer_models.append([str(task.destination), task.url])
+        except Exception:
+            self.current_download_plan = None
 
     def download_item(self, is_update_app=False):
         """Downloads the model selected."""
@@ -4352,37 +4291,44 @@ class MainWindow(TkinterDnD.Tk if is_dnd_compatible else tk.Tk):
         self.stop_download_Button_ENABLE()
         self.disable_tabs()
         
-        def download_progress_bar(current, total, model=80):
-            progress = ('%s' % (100 * current // total))
-            self.download_progress_bar_var.set(int(progress))
-            self.download_progress_percent_var.set(progress + ' %')
+        def download_progress_bar(item_index, total_items, current, total, task):
+            if total:
+                progress = ('%s' % (100 * current // total))
+                self.download_progress_bar_var.set(int(progress))
+                self.download_progress_percent_var.set(progress + ' %')
+            self.download_progress_info_var.set(f'{DOWNLOADING_ITEM} {item_index}/{total_items}...')
             
         def push_download():
             self.is_download_thread_active = True
             try:
                 if is_update_app:
                     self.download_progress_info_var.set(DOWNLOADING_UPDATE)
-                    if os.path.isfile(self.download_update_path_var.get()):
+                    plan = downloads_service_module.DownloadPlan(
+                        selection="update",
+                        model_type="update",
+                        tasks=(
+                            downloads_service_module.DownloadTask(
+                                name="update",
+                                url=self.download_update_link_var.get(),
+                                destination=Path(self.download_update_path_var.get()),
+                            ),
+                        ),
+                    )
+                    result = downloads_service_module.execute_download_plan(plan, progress=download_progress_bar)
+                    if result.skipped_existing:
                         self.download_progress_info_var.set(FILE_EXISTS)
-                    else:
-                        wget.download(self.download_update_link_var.get(), self.download_update_path_var.get(), bar=download_progress_bar)
-                        
                     self.download_post_action(DOWNLOAD_UPDATE_COMPLETE)
                 else:
-                    if self.select_download_var.get() == DEMUCS_ARCH_TYPE and is_demucs_newer:
-                        for model_num, model_data in enumerate(self.download_demucs_newer_models, start=1):
-                            self.download_progress_info_var.set('{} {}/{}...'.format(DOWNLOADING_ITEM, model_num, len(self.download_demucs_newer_models)))
-                            if os.path.isfile(model_data[0]):
-                                continue
-                            else:
-                                wget.download(model_data[1], model_data[0], bar=download_progress_bar)
-                    else:
+                    plan = getattr(self, "current_download_plan", None)
+                    if plan is None:
+                        self.download_progress_info_var.set(DOWNLOAD_FAILED)
+                        self.download_post_action(DOWNLOAD_FAILED)
+                        return
+                    if len(plan.tasks) == 1:
                         self.download_progress_info_var.set(SINGLE_DOWNLOAD)
-                        if os.path.isfile(self.download_save_path_var.get()):
-                            self.download_progress_info_var.set(FILE_EXISTS)
-                        else:
-                            wget.download(self.download_link_path_var.get(), self.download_save_path_var.get(), bar=download_progress_bar)
-                            
+                    result = downloads_service_module.execute_download_plan(plan, progress=download_progress_bar)
+                    if result.skipped_existing and not result.completed:
+                        self.download_progress_info_var.set(FILE_EXISTS)
                     self.download_post_action(DOWNLOAD_COMPLETE)
                 
             except Exception as e:

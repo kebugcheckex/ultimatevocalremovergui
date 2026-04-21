@@ -18,6 +18,7 @@ from gui_data.constants import (
     DEF_OPT,
     MDX23_OVERLAP,
     MDX_ARCH_TYPE,
+    NO_CODE,
     MDX_OVERLAP,
     VR_ARCH_PM,
     VR_ARCH_TYPE,
@@ -25,16 +26,24 @@ from gui_data.constants import (
 )
 from uvr.domain.model_data import ModelData, ModelDataResolvers, ModelDataSettings
 from uvr.runtime import (
-    DEMUCS_MODELS_DIR,
-    DEMUCS_NEWER_REPO_DIR,
-    MDX_MODELS_DIR,
-    VR_MODELS_DIR,
+    DEFAULT_PATHS,
+    RuntimePaths,
     configure_backend_runtime,
-    discover_models,
-    read_model_catalog,
 )
-from uvr_core.events import Event, LogEvent, ProgressEvent, ResultEvent, StatusEvent
-from uvr_core.requests import SeparationRequest
+from uvr.services.cache import SourceCache
+from uvr.services.catalog import list_installed_models, load_model_catalog
+from uvr.services.downloads import (
+    ModelSettingsBundle,
+    build_download_catalog,
+    execute_download_plan,
+    fetch_online_state,
+    list_downloadable_items,
+    load_or_fetch_model_settings,
+    resolve_download_plan,
+    validate_vip_code,
+)
+from uvr_core.events import DownloadResultEvent, Event, LogEvent, ProgressEvent, ResultEvent, StatusEvent
+from uvr_core.requests import DownloadRequest, SeparationRequest
 
 
 configure_backend_runtime()
@@ -55,6 +64,24 @@ class ProcessResult:
     model: ResolvedModel
 
 
+@dataclass(frozen=True)
+class AvailableDownloads:
+    bulletin: str | None
+    vr_items: tuple[str, ...]
+    mdx_items: tuple[str, ...]
+    demucs_items: tuple[str, ...]
+    decoded_vip_link: str
+
+
+@dataclass(frozen=True)
+class DownloadJobResult:
+    completed_files: tuple[str, ...]
+    skipped_existing: tuple[str, ...]
+    model_type: str
+    selection: str
+    refreshed_settings: ModelSettingsBundle | None = None
+
+
 EventSubscriber = Callable[[Event], None]
 
 
@@ -62,7 +89,7 @@ class SeparationJob:
     """Thin job wrapper around the legacy separation backend."""
 
     def __init__(self) -> None:
-        self.catalog = read_model_catalog()
+        self.catalog = load_model_catalog()
 
     def available_process_methods(self) -> tuple[str, ...]:
         methods = []
@@ -131,7 +158,7 @@ class SeparationJob:
         if not model.model_status:
             raise RuntimeError(f'The selected backend model "{resolved_model.model_name}" is not available.')
 
-        cache = _CacheState()
+        cache = SourceCache()
         processed: list[str] = []
 
         try:
@@ -226,37 +253,14 @@ class SeparationJob:
             subscriber(event)
 
     def _available_models(self) -> list[ResolvedModel]:
-        mdx_raw = discover_models(MDX_MODELS_DIR, (".onnx", ".ckpt"), is_mdxnet=True)
-        demucs_raw = discover_models(DEMUCS_MODELS_DIR, (".ckpt", ".gz", ".th")) + discover_models(
-            DEMUCS_NEWER_REPO_DIR,
-            ".yaml",
-        )
-        vr_raw = discover_models(VR_MODELS_DIR, ".pth")
-
-        def remap(name: str, mapper: dict[str, str]) -> str:
-            for old_name, new_name in mapper.items():
-                if name in old_name:
-                    return new_name
-            return name
-
-        resolved = [ResolvedModel(process_method=VR_ARCH_PM, model_name=name, source="vr") for name in sorted(vr_raw)]
-        resolved.extend(
+        return [
             ResolvedModel(
-                process_method=MDX_ARCH_TYPE,
-                model_name=remap(name, self.catalog["mdx_name_select_mapper"]),
-                source="mdx",
+                process_method=model.process_method,
+                model_name=model.model_name,
+                source=model.source,
             )
-            for name in sorted(mdx_raw)
-        )
-        resolved.extend(
-            ResolvedModel(
-                process_method=DEMUCS_ARCH_TYPE,
-                model_name=remap(name, self.catalog["demucs_name_select_mapper"]),
-                source="demucs",
-            )
-            for name in sorted(demucs_raw)
-        )
-        return resolved
+            for model in list_installed_models(self.catalog)
+        ]
 
     def _build_model(self, resolved_model: ResolvedModel, request: SeparationRequest) -> ModelData:
         return ModelData(
@@ -309,11 +313,11 @@ class SeparationJob:
             crop_size=256,
             is_high_end_process=False,
             post_process_threshold=0.2,
-            vr_hash_mapper=self.catalog["vr_hash_mapper"],
+            vr_hash_mapper=self.catalog.vr_hash_mapper,
             mdx_is_secondary_model_activate=False,
             margin=44100,
             mdx_segment_size=256,
-            mdx_hash_mapper=self.catalog["mdx_hash_mapper"],
+            mdx_hash_mapper=self.catalog.mdx_hash_mapper,
             compensate=AUTO_SELECT,
             demucs_is_secondary_model_activate=False,
             is_demucs_pre_proc_model_activate=False,
@@ -323,8 +327,8 @@ class SeparationJob:
             is_split_mode=True,
             segment=DEF_OPT,
             is_chunk_demucs=False,
-            mdx_name_select_mapper=self.catalog["mdx_name_select_mapper"],
-            demucs_name_select_mapper=self.catalog["demucs_name_select_mapper"],
+            mdx_name_select_mapper=self.catalog.mdx_name_select_mapper,
+            demucs_name_select_mapper=self.catalog.demucs_name_select_mapper,
         )
 
     def _normalize_wav_type(self, wav_type: str, save_format: str) -> str:
@@ -351,7 +355,7 @@ class SeparationJob:
         audio_file: str,
         audio_file_base: str,
         export_path: str,
-        cache: "_CacheState",
+        cache: SourceCache,
         subscriber: EventSubscriber | None,
         file_index: int,
         total_files: int,
@@ -411,22 +415,97 @@ class SeparationJob:
         raise RuntimeError(f"Unsupported process method: {model.process_method}")
 
 
-class _CacheState:
-    def __init__(self) -> None:
-        self._cache: dict[str, dict[str, object]] = {
-            VR_ARCH_TYPE: {},
-            MDX_ARCH_TYPE: {},
-            DEMUCS_ARCH_TYPE: {},
-        }
+class DownloadJob:
+    """Thin job wrapper around the framework-neutral download services."""
 
-    def cached_source_callback(self, process_method: str, model_name: str | None = None):
-        mapper = self._cache.get(process_method, {})
-        for key, value in mapper.items():
-            if model_name and model_name in key:
-                return key, value
-        return None, None
+    def __init__(
+        self,
+        *,
+        paths: RuntimePaths = DEFAULT_PATHS,
+        opener=None,
+    ) -> None:
+        self.paths = paths
+        self.opener = opener
 
-    def cached_model_source_holder(self, process_method: str, sources, model_name: str | None = None) -> None:
-        if model_name is None:
-            return
-        self._cache.setdefault(process_method, {})[model_name] = sources
+    def available_downloads(self, vip_code: str = "") -> AvailableDownloads:
+        online_state = fetch_online_state(opener=self._opener())
+        decoded_vip_link = validate_vip_code(vip_code) if vip_code else NO_CODE
+        catalog = build_download_catalog(online_state.payload, decoded_vip_link=decoded_vip_link)
+        return AvailableDownloads(
+            bulletin=online_state.bulletin,
+            vr_items=tuple(list_downloadable_items(catalog, VR_ARCH_TYPE, paths=self.paths, opener=self._opener())),
+            mdx_items=tuple(list_downloadable_items(catalog, MDX_ARCH_TYPE, paths=self.paths, opener=self._opener())),
+            demucs_items=tuple(list_downloadable_items(catalog, DEMUCS_ARCH_TYPE, paths=self.paths, opener=self._opener())),
+            decoded_vip_link=decoded_vip_link,
+        )
+
+    def run(
+        self,
+        request: DownloadRequest,
+        *,
+        subscriber: EventSubscriber | None = None,
+    ) -> DownloadJobResult:
+        self._emit(subscriber, StatusEvent(message="Refreshing download catalog"))
+        online_state = fetch_online_state(opener=self._opener())
+        decoded_vip_link = validate_vip_code(request.vip_code) if request.vip_code else NO_CODE
+        catalog = build_download_catalog(online_state.payload, decoded_vip_link=decoded_vip_link)
+        model_type = self._normalize_model_type(request.model_type)
+        plan = resolve_download_plan(
+            request.selection,
+            model_type,
+            catalog,
+            decoded_vip_link=decoded_vip_link,
+            paths=self.paths,
+        )
+
+        self._emit(subscriber, LogEvent(message=f"Preparing download: {request.selection}"))
+        self._emit(subscriber, StatusEvent(message=f"Downloading {request.selection}"))
+
+        def progress(item_index: int, total_items: int, current: int, total: int, _task) -> None:
+            completed_items = item_index - 1
+            item_fraction = (current / total) if total else 0.0
+            percent = ((completed_items + item_fraction) / total_items) * 100.0 if total_items else 100.0
+            self._emit(
+                subscriber,
+                ProgressEvent(percent=percent, current_file=item_index, total_files=total_items),
+            )
+
+        result = execute_download_plan(plan, opener=self._opener(), progress=progress)
+
+        refreshed_settings = None
+        if request.refresh_model_settings:
+            self._emit(subscriber, StatusEvent(message="Refreshing model settings"))
+            refreshed_settings = load_or_fetch_model_settings(paths=self.paths, opener=self._opener())
+
+        job_result = DownloadJobResult(
+            completed_files=tuple(str(path) for path in result.completed),
+            skipped_existing=tuple(str(path) for path in result.skipped_existing),
+            model_type=model_type,
+            selection=request.selection,
+            refreshed_settings=refreshed_settings,
+        )
+        self._emit(subscriber, StatusEvent(message="Completed"))
+        self._emit(
+            subscriber,
+            DownloadResultEvent(
+                completed_files=job_result.completed_files,
+                skipped_existing=job_result.skipped_existing,
+                model_type=job_result.model_type,
+                selection=job_result.selection,
+            ),
+        )
+        return job_result
+
+    def _emit(self, subscriber: EventSubscriber | None, event: Event) -> None:
+        if subscriber is not None:
+            subscriber(event)
+
+    def _normalize_model_type(self, model_type: str) -> str:
+        return VR_ARCH_TYPE if model_type == VR_ARCH_PM else model_type
+
+    def _opener(self):
+        if self.opener is not None:
+            return self.opener
+        from urllib.request import urlopen
+
+        return urlopen

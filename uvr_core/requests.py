@@ -138,3 +138,11 @@ class SeparationRequest:
             ),
             extra_settings={key: value for key, value in values.items() if key not in mapped_keys},
         )
+
+
+@dataclass(frozen=True)
+class DownloadRequest:
+    model_type: str
+    selection: str
+    vip_code: str = ""
+    refresh_model_settings: bool = True

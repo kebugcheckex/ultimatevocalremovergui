@@ -117,19 +117,6 @@ def load_json(path: str | Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def discover_models(
-    directory: str | Path,
-    ext: str | tuple[str, ...],
-    *,
-    is_mdxnet: bool = False,
-) -> tuple[str, ...]:
-    return tuple(
-        item if is_mdxnet and item.endswith(constants.CKPT) else os.path.splitext(item)[0]
-        for item in os.listdir(directory)
-        if item.endswith(ext)
-    )
-
-
 def configure_backend_runtime() -> Any:
     os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba")
     os.chdir(DEFAULT_PATHS.base_path)
@@ -143,9 +130,17 @@ def configure_backend_runtime() -> Any:
 
 
 def read_model_catalog() -> dict[str, dict[str, Any]]:
-    return {
-        "vr_hash_mapper": load_json(VR_HASH_JSON),
-        "mdx_hash_mapper": load_json(MDX_HASH_JSON),
-        "mdx_name_select_mapper": load_json(MDX_MODEL_NAME_SELECT),
-        "demucs_name_select_mapper": load_json(DEMUCS_MODEL_NAME_SELECT),
-    }
+    from uvr.services.catalog import load_model_catalog
+
+    return load_model_catalog(DEFAULT_PATHS).to_dict()
+
+
+def discover_models(
+    directory: str | Path,
+    ext: str | tuple[str, ...],
+    *,
+    is_mdxnet: bool = False,
+) -> tuple[str, ...]:
+    from uvr.services.catalog import discover_models as discover_catalog_models
+
+    return discover_catalog_models(directory, ext, is_mdxnet=is_mdxnet)
