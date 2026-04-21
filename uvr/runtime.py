@@ -122,10 +122,27 @@ def configure_backend_runtime() -> Any:
     os.chdir(DEFAULT_PATHS.base_path)
 
     runtime = create_runtime(DEFAULT_PATHS)
+    runtime.os = os
+
+    import time as time_module
+    from lib_v5 import spec_utils
+    import matchering as match
+    from separate import save_format
+    from uvr.domain import audio_tools as audio_tools_module
+    from uvr.domain import ensemble as ensemble_module
+
+    runtime.time = time_module
+    runtime.spec_utils = spec_utils
+    runtime.save_format = save_format
+    runtime.match = match
+    runtime.ENSEMBLE_TEMP_PATH = str(DEFAULT_PATHS.base_path / "ensemble_temps")
+    Path(runtime.ENSEMBLE_TEMP_PATH).mkdir(parents=True, exist_ok=True)
 
     from uvr.domain import model_data as model_data_module
 
     model_data_module.configure_runtime(runtime)
+    audio_tools_module.configure_runtime(runtime)
+    ensemble_module.configure_runtime(runtime)
     return runtime
 
 

@@ -15,6 +15,16 @@ This application uses state-of-the-art source separation models to remove vocals
 - **Support the Project**
     - [Donate](https://www.buymeacoffee.com/uvr5)
 
+## CLI
+
+This repository now includes a standalone command-line interface built on the shared backend:
+
+```bash
+python -m uvr_cli --help
+```
+
+The CLI does not require `PySide6` and does not depend on the in-progress Qt frontend. See [docs/cli.md](docs/cli.md) for usage, deployment notes, and command examples.
+
 ## Installation
 
 These bundles contain the UVR interface, Python, PyTorch, and other dependencies needed to run the application effectively. No prerequisites are required.

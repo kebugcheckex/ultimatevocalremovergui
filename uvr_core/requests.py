@@ -146,3 +146,39 @@ class DownloadRequest:
     selection: str
     vip_code: str = ""
     refresh_model_settings: bool = True
+
+
+@dataclass(frozen=True)
+class EnsembleRequest:
+    input_paths: tuple[str, ...]
+    export_path: str
+    algorithm: str
+    output_name: str = "Ensembled"
+    save_format: str = "WAV"
+    wav_type: str = "PCM_16"
+    mp3_bitrate: str = "320k"
+    normalize_output: bool = False
+    wav_ensemble: bool = False
+
+
+@dataclass(frozen=True)
+class AudioToolRequest:
+    audio_tool: str
+    input_paths: tuple[str, ...]
+    export_path: str
+    save_format: str = "WAV"
+    wav_type: str = "PCM_16"
+    mp3_bitrate: str = "320k"
+    normalize_output: bool = False
+    testing_audio: bool = False
+    align_window: str = "3"
+    align_intro: str = "Default"
+    db_analysis: str = "Medium"
+    save_aligned: bool = False
+    match_silence: bool = True
+    spec_match: bool = False
+    phase_option: str = "Automatic"
+    phase_shifts: str = "None"
+    time_stretch_rate: str = "2.0"
+    pitch_rate: str = "2.0"
+    time_correction: bool = True

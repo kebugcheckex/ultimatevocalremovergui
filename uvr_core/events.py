@@ -60,4 +60,34 @@ class DownloadResultEvent:
         return asdict(self)
 
 
-Event = Union[LogEvent, StatusEvent, ProgressEvent, ResultEvent, DownloadResultEvent]
+@dataclass(frozen=True)
+class EnsembleResultEvent:
+    output_path: str
+    inputs: tuple[str, ...]
+    algorithm: str
+    event_type: str = "ensemble_result"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AudioToolResultEvent:
+    audio_tool: str
+    output_paths: tuple[str, ...]
+    inputs: tuple[str, ...]
+    event_type: str = "audio_tool_result"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+Event = Union[
+    LogEvent,
+    StatusEvent,
+    ProgressEvent,
+    ResultEvent,
+    DownloadResultEvent,
+    EnsembleResultEvent,
+    AudioToolResultEvent,
+]

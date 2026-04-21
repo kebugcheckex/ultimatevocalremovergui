@@ -8,22 +8,34 @@ from pathlib import Path
 from typing import Callable
 
 from gui_data.constants import (
+    ALIGN_INPUTS,
     ALL_STEMS,
     AUTO_SELECT,
     CHOOSE_MODEL,
+    CHANGE_PITCH,
     DEFAULT,
     DENOISE_NONE,
     DEMUCS_ARCH_TYPE,
     DEMUCS_OVERLAP,
     DEF_OPT,
+    INTRO_MAPPER,
+    MATCH_INPUTS,
+    MDX_OVERLAP,
     MDX23_OVERLAP,
     MDX_ARCH_TYPE,
     NO_CODE,
-    MDX_OVERLAP,
+    PHASE_SHIFTS_OPT,
+    PITCH_TEXT,
+    TIME_TEXT,
+    TIME_STRETCH,
+    TIME_WINDOW_MAPPER,
+    VOLUME_MAPPER,
     VR_ARCH_PM,
     VR_ARCH_TYPE,
     WAV,
 )
+from uvr.domain.audio_tools import AudioTools, AudioToolSettings
+from uvr.domain.ensemble import Ensembler, EnsemblerSettings
 from uvr.domain.model_data import ModelData, ModelDataResolvers, ModelDataSettings
 from uvr.runtime import (
     DEFAULT_PATHS,
@@ -42,8 +54,8 @@ from uvr.services.downloads import (
     resolve_download_plan,
     validate_vip_code,
 )
-from uvr_core.events import DownloadResultEvent, Event, LogEvent, ProgressEvent, ResultEvent, StatusEvent
-from uvr_core.requests import DownloadRequest, SeparationRequest
+from uvr_core.events import AudioToolResultEvent, DownloadResultEvent, EnsembleResultEvent, Event, LogEvent, ProgressEvent, ResultEvent, StatusEvent
+from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
 
 
 configure_backend_runtime()
@@ -80,6 +92,26 @@ class DownloadJobResult:
     model_type: str
     selection: str
     refreshed_settings: ModelSettingsBundle | None = None
+
+
+@dataclass(frozen=True)
+class CatalogRefreshResult:
+    available_downloads: AvailableDownloads
+    refreshed_settings: ModelSettingsBundle | None = None
+
+
+@dataclass(frozen=True)
+class EnsembleJobResult:
+    output_path: str
+    inputs: tuple[str, ...]
+    algorithm: str
+
+
+@dataclass(frozen=True)
+class AudioToolJobResult:
+    audio_tool: str
+    output_paths: tuple[str, ...]
+    inputs: tuple[str, ...]
 
 
 EventSubscriber = Callable[[Event], None]
@@ -439,6 +471,21 @@ class DownloadJob:
             decoded_vip_link=decoded_vip_link,
         )
 
+    def refresh_catalog(
+        self,
+        *,
+        vip_code: str = "",
+        refresh_model_settings: bool = True,
+    ) -> CatalogRefreshResult:
+        available = self.available_downloads(vip_code)
+        refreshed_settings = None
+        if refresh_model_settings:
+            refreshed_settings = load_or_fetch_model_settings(paths=self.paths, opener=self._opener())
+        return CatalogRefreshResult(
+            available_downloads=available,
+            refreshed_settings=refreshed_settings,
+        )
+
     def run(
         self,
         request: DownloadRequest,
@@ -509,3 +556,270 @@ class DownloadJob:
         from urllib.request import urlopen
 
         return urlopen
+
+
+class EnsembleJob:
+    """Framework-neutral wrapper around manual ensemble operations."""
+
+    def run(
+        self,
+        request: EnsembleRequest,
+        *,
+        subscriber: EventSubscriber | None = None,
+    ) -> EnsembleJobResult:
+        input_paths = tuple(path for path in request.input_paths if path)
+        if len(input_paths) < 2:
+            raise RuntimeError("Manual ensemble requires at least two input files.")
+        if not request.export_path:
+            raise RuntimeError("No output folder selected.")
+
+        export_path = Path(request.export_path)
+        export_path.mkdir(parents=True, exist_ok=True)
+
+        for path in input_paths:
+            if not Path(path).is_file():
+                raise RuntimeError(f'Input file does not exist: "{path}"')
+
+        self._emit(subscriber, StatusEvent(message="Preparing ensemble"))
+        self._emit(subscriber, LogEvent(message=f"Algorithm: {request.algorithm}"))
+        self._emit(
+            subscriber,
+            ProgressEvent(percent=0.0, current_file=0, total_files=len(input_paths)),
+        )
+
+        ensembler = Ensembler(
+            settings=EnsemblerSettings(
+                is_save_all_outputs_ensemble=False,
+                chosen_ensemble_name=request.output_name,
+                ensemble_type=f"{request.algorithm}/{request.algorithm}",
+                ensemble_main_stem_pair=("", ""),
+                export_path=str(export_path),
+                is_append_ensemble_name=False,
+                is_testing_audio=False,
+                is_normalization=request.normalize_output,
+                is_wav_ensemble=request.wav_ensemble,
+                wav_type_set=request.wav_type,
+                mp3_bit_set=request.mp3_bitrate,
+                save_format=request.save_format,
+                choose_algorithm=request.algorithm,
+            ),
+            is_manual_ensemble=True,
+        )
+
+        audio_file_base = request.output_name
+        if request.algorithm == "Combine Inputs":
+            ensembler.combine_audio(list(input_paths), audio_file_base)
+        else:
+            ensembler.ensemble_manual(list(input_paths), audio_file_base)
+
+        output_suffix = request.save_format.lower()
+        if request.algorithm == "Combine Inputs":
+            output_path = export_path / f"{audio_file_base}.{output_suffix}"
+        else:
+            algorithm_text = f"_({request.algorithm})"
+            output_path = export_path / f"{audio_file_base}{algorithm_text}.{output_suffix}"
+
+        result = EnsembleJobResult(
+            output_path=str(output_path),
+            inputs=input_paths,
+            algorithm=request.algorithm,
+        )
+        self._emit(
+            subscriber,
+            ProgressEvent(percent=100.0, current_file=len(input_paths), total_files=len(input_paths)),
+        )
+        self._emit(subscriber, StatusEvent(message="Completed"))
+        self._emit(
+            subscriber,
+            EnsembleResultEvent(
+                output_path=result.output_path,
+                inputs=result.inputs,
+                algorithm=result.algorithm,
+            ),
+        )
+        return result
+
+    def _emit(self, subscriber: EventSubscriber | None, event: Event) -> None:
+        if subscriber is not None:
+            subscriber(event)
+
+
+class AudioToolJob:
+    """Framework-neutral wrapper around legacy audio-tool operations."""
+
+    def run(
+        self,
+        request: AudioToolRequest,
+        *,
+        subscriber: EventSubscriber | None = None,
+    ) -> AudioToolJobResult:
+        input_paths = tuple(path for path in request.input_paths if path)
+        if not input_paths:
+            raise RuntimeError("No input files selected.")
+        if not request.export_path:
+            raise RuntimeError("No output folder selected.")
+
+        export_path = Path(request.export_path)
+        export_path.mkdir(parents=True, exist_ok=True)
+
+        for path in input_paths:
+            if not Path(path).is_file():
+                raise RuntimeError(f'Input file does not exist: "{path}"')
+
+        if request.audio_tool in {ALIGN_INPUTS, MATCH_INPUTS} and len(input_paths) != 2:
+            raise RuntimeError(f"{request.audio_tool} requires exactly two input files.")
+
+        settings = AudioToolSettings(
+            export_path=str(export_path),
+            wav_type_set=request.wav_type,
+            is_normalization=request.normalize_output,
+            is_testing_audio=request.testing_audio,
+            save_format=request.save_format,
+            mp3_bit_set=request.mp3_bitrate,
+            align_window=TIME_WINDOW_MAPPER[request.align_window],
+            align_intro_val=INTRO_MAPPER[request.align_intro],
+            db_analysis_val=VOLUME_MAPPER[request.db_analysis],
+            is_save_align=request.save_aligned,
+            is_match_silence=request.match_silence,
+            is_spec_match=request.spec_match,
+            phase_option=request.phase_option,
+            phase_shifts=PHASE_SHIFTS_OPT[request.phase_shifts],
+            time_stretch_rate=request.time_stretch_rate,
+            pitch_rate=request.pitch_rate,
+            is_time_correction=request.time_correction,
+        )
+        audio_tool = AudioTools(request.audio_tool, settings=settings)
+        output_suffix = self._output_suffix(request.save_format)
+
+        self._emit(subscriber, StatusEvent(message=f"Preparing {request.audio_tool.lower()}"))
+        self._emit(subscriber, ProgressEvent(percent=0.0, current_file=0, total_files=len(input_paths)))
+
+        if request.audio_tool in {ALIGN_INPUTS, MATCH_INPUTS}:
+            output_paths = self._run_dual_input_tool(
+                request=request,
+                input_paths=input_paths,
+                export_path=export_path,
+                output_suffix=output_suffix,
+                audio_tool=audio_tool,
+                subscriber=subscriber,
+            )
+        else:
+            output_paths = self._run_single_input_tool(
+                request=request,
+                input_paths=input_paths,
+                export_path=export_path,
+                output_suffix=output_suffix,
+                audio_tool=audio_tool,
+                subscriber=subscriber,
+            )
+
+        result = AudioToolJobResult(
+            audio_tool=request.audio_tool,
+            output_paths=output_paths,
+            inputs=input_paths,
+        )
+        self._emit(subscriber, StatusEvent(message="Completed"))
+        self._emit(
+            subscriber,
+            AudioToolResultEvent(
+                audio_tool=result.audio_tool,
+                output_paths=result.output_paths,
+                inputs=result.inputs,
+            ),
+        )
+        return result
+
+    def _run_dual_input_tool(
+        self,
+        *,
+        request: AudioToolRequest,
+        input_paths: tuple[str, ...],
+        export_path: Path,
+        output_suffix: str,
+        audio_tool: AudioTools,
+        subscriber: EventSubscriber | None,
+    ) -> tuple[str, ...]:
+        first_base = Path(input_paths[0]).stem
+        second_base = Path(input_paths[1]).stem
+        prefix = audio_tool.is_testing_audio
+
+        self._emit(subscriber, LogEvent(message=f'Input 1: "{Path(input_paths[0]).name}"'))
+        self._emit(subscriber, LogEvent(message=f'Input 2: "{Path(input_paths[1]).name}"'))
+
+        if request.audio_tool == MATCH_INPUTS:
+            self._emit(subscriber, StatusEvent(message="Processing matchering"))
+            audio_tool.match_inputs(
+                list(input_paths),
+                first_base,
+                lambda message: self._emit_log(subscriber, message),
+            )
+            output_paths = (str(export_path / f"{prefix}{first_base}_(Matched).{output_suffix}"),)
+        else:
+            self._emit(subscriber, StatusEvent(message="Processing alignment"))
+            audio_tool.align_inputs(
+                list(input_paths),
+                first_base,
+                second_base,
+                lambda message: self._emit_log(subscriber, message),
+                lambda step, inference_iterations=0: self._emit(
+                    subscriber,
+                    ProgressEvent(
+                        percent=min(99.0, max(0.0, (step + inference_iterations) * 100.0)),
+                        current_file=2,
+                        total_files=2,
+                    ),
+                ),
+            )
+            output_paths = [str(export_path / f"{prefix}{first_base}_(Inverted).{output_suffix}")]
+            if request.save_aligned or request.spec_match:
+                output_paths.append(str(export_path / f"{prefix}{second_base}_(Aligned).{output_suffix}"))
+
+        self._emit(subscriber, ProgressEvent(percent=100.0, current_file=2, total_files=2))
+        return tuple(output_paths)
+
+    def _run_single_input_tool(
+        self,
+        *,
+        request: AudioToolRequest,
+        input_paths: tuple[str, ...],
+        export_path: Path,
+        output_suffix: str,
+        audio_tool: AudioTools,
+        subscriber: EventSubscriber | None,
+    ) -> tuple[str, ...]:
+        output_paths: list[str] = []
+        total = len(input_paths)
+        file_text = TIME_TEXT if request.audio_tool == TIME_STRETCH else PITCH_TEXT
+
+        for index, path in enumerate(input_paths, start=1):
+            base_name = Path(path).stem
+            self._emit(subscriber, StatusEvent(message=f"Processing {index}/{total}"))
+            self._emit(subscriber, LogEvent(message=f'Input {index}/{total}: "{Path(path).name}"'))
+            audio_tool.pitch_or_time_shift(path, base_name)
+            output_paths.append(str(export_path / f"{audio_tool.is_testing_audio}{base_name}{file_text}.{output_suffix}"))
+            self._emit(
+                subscriber,
+                ProgressEvent(
+                    percent=(index / total) * 100.0,
+                    current_file=index,
+                    total_files=total,
+                ),
+            )
+
+        return tuple(output_paths)
+
+    def _emit_log(self, subscriber: EventSubscriber | None, message: str) -> None:
+        cleaned = message.strip()
+        if cleaned:
+            self._emit(subscriber, LogEvent(message=cleaned))
+
+    def _output_suffix(self, save_format: str) -> str:
+        return {
+            "WAV": "wav",
+            "FLAC": "flac",
+            "MP3": "mp3",
+        }.get(save_format.upper(), save_format.lower())
+
+    def _emit(self, subscriber: EventSubscriber | None, event: Event) -> None:
+        if subscriber is not None:
+            subscriber(event)

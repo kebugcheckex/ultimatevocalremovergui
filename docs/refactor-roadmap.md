@@ -45,12 +45,13 @@ Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_
 ## Current Status Snapshot
 
 - `uvr/config/`, `uvr/domain/`, `uvr/services/processing.py`, `uvr/services/catalog.py`, `uvr/services/cache.py`, and `uvr/services/downloads.py` exist.
-- `uvr_core/` exists with typed requests, typed events, `SeparationJob`, and `DownloadJob`.
+- `uvr_core/` now exposes typed requests, typed events, and headless jobs for separation, downloads, manual ensemble, and audio tools.
 - `uvr/runtime.py` owns backend runtime/bootstrap and path configuration, with env-var overrides for model/base paths.
-- `uvr_qt/services/processing_facade.py` is now a Qt adapter over `uvr_core`, and `AppState` derives a backend `SeparationRequest`.
-- `uvr_cli/` imports from `uvr_core`/`uvr` rather than `uvr_qt`, and real CLI smoke separation has run successfully against a local model.
+- `uvr_cli/` imports from `uvr_core`/`uvr` rather than `uvr_qt`, supports `separate`, `ensemble`, `audio-tool`, `download`, `refresh-catalog`, and `config`, and supports machine-readable JSON output for listings and progress events.
+- The CLI is runnable standalone via `python -m uvr_cli` and does not require `PySide6` or any Phase 4 Qt module.
+- `uvr_qt/services/processing_facade.py` remains a thin Qt adapter over `uvr_core`, but Phase 4 UI work has not started here.
 - `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
-- Downloads, cache, and model catalog are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state and remains the runtime shell for many non-separation workflows.
+- Downloads, cache, model catalog, ensemble, and audio tools are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state for the legacy app shell.
 
 ## Roadmap
 
@@ -98,7 +99,7 @@ Current progress:
 
 **Exit:** the three services are reachable from a headless Python session without importing `UVR.py`. (Done.)
 
-### Phase 3 — CLI parity with "mainstream" workflows
+### Phase 3 — CLI parity with "mainstream" workflows (done)
 
 Grow `uvr_cli` from single-model separation to cover what most users actually do:
 
@@ -108,7 +109,7 @@ Grow `uvr_cli` from single-model separation to cover what most users actually do
 - `uvr-cli config show|set` — manipulate persisted settings headlessly.
 - Machine-readable output: `--json` for `list-*`, `--progress=json` for jobs so it composes with other tools/CI.
 
-**Exit:** a new user with only the CLI and `./models/` can run every job type the Tk app offers except the advanced popup-driven tweaks.
+**Exit:** a new user with only the CLI and `./models/` can run every job type the Tk app offers except the advanced popup-driven tweaks. (Done.)
 
 ### Phase 4 — PySide6 main window (first release)
 
@@ -150,8 +151,8 @@ Not implemented in this project, but the architecture should support it triviall
 
 ## Sequencing Rationale
 
-- **Phases 1 and 2 are prerequisites for everything else.** Phase 1 is now complete. Phase 2 is partially complete via extracted catalog/cache/download services, but download job wiring and remaining Tk-era orchestration still need to move before the backend boundary is fully settled.
-- **Phase 3 before Phase 4.** The CLI is the cheapest way to stress the backend boundary. Bugs found while wiring the CLI are bugs the Qt frontend would have hit too, found without Qt-specific noise.
+- **Phases 1 and 2 are prerequisites for everything else.** Those backend boundary phases are complete enough for adapter work: the shared CLI now exercises downloads, catalog, config, ensemble, audio-tool, and separation paths without importing Qt.
+- **Phase 3 before Phase 4.** That sequencing paid off: the CLI now stress-tests the shared request/event/job surface before the PySide6 main-window work begins.
 - **Phases 4 and 5 can overlap** once Phase 3 has validated the event/request surface.
 - **Phase 6 is gated on Phase 5.** Do not delete `UVR.py` until the Qt app covers the flows its users depend on.
 

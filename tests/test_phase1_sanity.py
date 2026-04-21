@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import io
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from gui_data.constants import DEFAULT_DATA, VR_ARCH_PM
+from click.testing import CliRunner
+from gui_data.constants import ALIGN_INPUTS, CHANGE_PITCH, DEFAULT_DATA, MATCH_INPUTS, TIME_STRETCH, VR_ARCH_PM
 from uvr.config.models import AppSettings
 from uvr.runtime import RuntimePaths, build_runtime_paths
 from uvr.services.cache import SourceCache
@@ -21,9 +24,10 @@ from uvr.services.downloads import (
     resolve_download_plan,
     validate_vip_code,
 )
-from uvr_core.events import DownloadResultEvent, LogEvent, ProgressEvent, ResultEvent, StatusEvent
-from uvr_core.jobs import DownloadJob, ResolvedModel, SeparationJob
-from uvr_core.requests import DownloadRequest, SeparationRequest
+from uvr_core.events import AudioToolResultEvent, DownloadResultEvent, EnsembleResultEvent, LogEvent, ProgressEvent, ResultEvent, StatusEvent
+from uvr_core.jobs import AudioToolJob, DownloadJob, EnsembleJob, ResolvedModel, SeparationJob
+from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
+from uvr_cli.__main__ import cli
 from uvr_qt.state.app_state import (
     AppState,
     ModelSelectionState,
@@ -336,6 +340,594 @@ class DownloadServiceTests(unittest.TestCase):
             self.assertTrue((vr_dir / "vr_one.pth").is_file())
             self.assertTrue(any(isinstance(event, ProgressEvent) for event in events))
             self.assertTrue(any(isinstance(event, DownloadResultEvent) for event in events))
+
+
+class CliDownloadCommandTests(unittest.TestCase):
+    def test_cli_module_imports_without_qt_or_pyside(self) -> None:
+        script = """
+import importlib
+import sys
+
+class BlockQtImports:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "uvr_qt" or fullname.startswith("uvr_qt."):
+            raise RuntimeError(f"unexpected Qt adapter import: {fullname}")
+        if fullname == "PySide6" or fullname.startswith("PySide6."):
+            raise RuntimeError(f"unexpected PySide6 import: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockQtImports())
+module = importlib.import_module("uvr_cli.__main__")
+sys.stdout.write(module.cli.help or "")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            env={**os.environ, "PYTHONPATH": "."},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Ultimate Vocal Remover command-line interface.", result.stdout)
+
+    def test_list_methods_supports_json_output(self) -> None:
+        runner = CliRunner()
+        job = mock.Mock()
+        job.available_process_methods.return_value = ("VR Architecture", "MDX-Net")
+
+        with mock.patch("uvr_cli.__main__.SeparationJob", return_value=job):
+            result = runner.invoke(cli, ["list-methods", "--json"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(json.loads(result.output), {"methods": ["VR Architecture", "MDX-Net"]})
+
+    def test_list_downloads_uses_download_job_output(self) -> None:
+        runner = CliRunner()
+        available = SimpleNamespace(
+            bulletin="notice",
+            vr_items=("VR One",),
+            mdx_items=("MDX One",),
+            demucs_items=(),
+        )
+        job = mock.Mock()
+        job.available_downloads.return_value = available
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(cli, ["list-downloads"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Bulletin: notice", result.output)
+        self.assertIn("VR:", result.output)
+        self.assertIn("VR One", result.output)
+        self.assertIn("MDX One", result.output)
+
+    def test_list_downloads_supports_json_output(self) -> None:
+        runner = CliRunner()
+        available = SimpleNamespace(
+            bulletin="notice",
+            vr_items=("VR One",),
+            mdx_items=(),
+            demucs_items=("Demucs One",),
+        )
+        job = mock.Mock()
+        job.available_downloads.return_value = available
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(cli, ["list-downloads", "--json"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            json.loads(result.output),
+            {
+                "bulletin": "notice",
+                "downloads": {"vr": ["VR One"], "mdx": [], "demucs": ["Demucs One"]},
+            },
+        )
+
+    def test_refresh_catalog_reports_summary(self) -> None:
+        runner = CliRunner()
+        refresh_result = SimpleNamespace(
+            available_downloads=SimpleNamespace(
+                bulletin="notice",
+                vr_items=("VR One",),
+                mdx_items=(),
+                demucs_items=("Demucs One", "Demucs Two"),
+            ),
+            refreshed_settings=object(),
+        )
+        job = mock.Mock()
+        job.refresh_catalog.return_value = refresh_result
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(cli, ["refresh-catalog"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Catalog refreshed.", result.output)
+        self.assertIn("VR downloads available: 1", result.output)
+        self.assertIn("Demucs downloads available: 2", result.output)
+        self.assertIn("Model settings refreshed: yes", result.output)
+
+    def test_refresh_catalog_supports_json_output(self) -> None:
+        runner = CliRunner()
+        refresh_result = SimpleNamespace(
+            available_downloads=SimpleNamespace(
+                bulletin="notice",
+                vr_items=("VR One",),
+                mdx_items=("MDX One",),
+                demucs_items=(),
+            ),
+            refreshed_settings=None,
+        )
+        job = mock.Mock()
+        job.refresh_catalog.return_value = refresh_result
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(cli, ["refresh-catalog", "--json", "--no-refresh-model-settings"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            json.loads(result.output),
+            {
+                "bulletin": "notice",
+                "vr_downloads_available": 1,
+                "mdx_downloads_available": 1,
+                "demucs_downloads_available": 0,
+                "model_settings_refreshed": False,
+            },
+        )
+
+    def test_download_command_builds_download_request(self) -> None:
+        runner = CliRunner()
+        captured = {}
+        job = mock.Mock()
+
+        def fake_run(request, subscriber=None):
+            captured["request"] = request
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Downloading test model"))
+                subscriber(ProgressEvent(percent=100.0, current_file=1, total_files=1))
+            return SimpleNamespace(
+                completed_files=("/tmp/model.pth",),
+                skipped_existing=(),
+            )
+
+        job.run.side_effect = fake_run
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(
+                cli,
+                ["download", "--type", "vr", "--model", "VR One", "--no-refresh-model-settings"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["request"], DownloadRequest(model_type=VR_ARCH_PM, selection="VR One", vip_code="", refresh_model_settings=False))
+        self.assertIn("Downloaded 1 file(s).", result.output)
+        self.assertIn("/tmp/model.pth", result.output)
+
+    def test_download_command_supports_json_progress(self) -> None:
+        runner = CliRunner()
+        job = mock.Mock()
+
+        def fake_run(_request, subscriber=None):
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Downloading test model"))
+                subscriber(ProgressEvent(percent=50.0, current_file=1, total_files=1))
+                subscriber(
+                    DownloadResultEvent(
+                        completed_files=("/tmp/model.pth",),
+                        skipped_existing=(),
+                        model_type="VR Architecture",
+                        selection="VR One",
+                    )
+                )
+            return SimpleNamespace(
+                completed_files=("/tmp/model.pth",),
+                skipped_existing=(),
+            )
+
+        job.run.side_effect = fake_run
+
+        with mock.patch("uvr_cli.__main__.DownloadJob", return_value=job):
+            result = runner.invoke(
+                cli,
+                ["download", "--type", "vr", "--model", "VR One", "--progress", "json", "--no-refresh-model-settings"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        output_lines = [json.loads(line) for line in result.output.strip().splitlines()]
+        self.assertEqual(output_lines[0]["event_type"], "status")
+        self.assertEqual(output_lines[1]["event_type"], "progress")
+        self.assertEqual(output_lines[2]["event_type"], "download_result")
+
+
+class CliConfigCommandTests(unittest.TestCase):
+    def test_config_show_supports_json_output(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["config", "show", "vr_model", "--json", "--data-file", "config.pkl"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(json.loads(result.output), {"vr_model": DEFAULT_DATA["vr_model"]})
+
+    def test_config_set_persists_boolean_value(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            set_result = runner.invoke(
+                cli,
+                ["config", "set", "is_gpu_conversion", "true", "--data-file", "config.pkl"],
+            )
+            show_result = runner.invoke(
+                cli,
+                ["config", "show", "is_gpu_conversion", "--json", "--data-file", "config.pkl"],
+            )
+
+        self.assertEqual(set_result.exit_code, 0)
+        self.assertEqual(show_result.exit_code, 0)
+        self.assertEqual(json.loads(show_result.output), {"is_gpu_conversion": True})
+
+    def test_config_set_persists_list_value_from_json(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            set_result = runner.invoke(
+                cli,
+                ["config", "set", "input_paths", '["a.wav", "b.wav"]', "--json", "--data-file", "config.pkl"],
+            )
+            show_result = runner.invoke(
+                cli,
+                ["config", "show", "input_paths", "--json", "--data-file", "config.pkl"],
+            )
+
+        self.assertEqual(set_result.exit_code, 0)
+        self.assertEqual(json.loads(set_result.output), {"input_paths": ["a.wav", "b.wav"]})
+        self.assertEqual(json.loads(show_result.output), {"input_paths": ["a.wav", "b.wav"]})
+
+    def test_config_set_rejects_unknown_key(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["config", "set", "not_a_key", "value"])
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("unknown config key", result.output)
+
+
+class EnsembleJobTests(unittest.TestCase):
+    def test_ensemble_job_runs_manual_ensemble(self) -> None:
+        job = EnsembleJob()
+        events = []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            export_path = tmp_path / "out"
+            input_a = tmp_path / "a.wav"
+            input_b = tmp_path / "b.wav"
+            input_a.write_bytes(b"a")
+            input_b.write_bytes(b"b")
+
+            called = {}
+
+            class FakeEnsembler:
+                def __init__(self, settings, is_manual_ensemble=False):
+                    called["settings"] = settings
+                    called["is_manual_ensemble"] = is_manual_ensemble
+
+                def ensemble_manual(self, audio_inputs, audio_file_base):
+                    called["audio_inputs"] = tuple(audio_inputs)
+                    called["audio_file_base"] = audio_file_base
+
+            with mock.patch("uvr_core.jobs.Ensembler", FakeEnsembler):
+                result = job.run(
+                    EnsembleRequest(
+                        input_paths=(str(input_a), str(input_b)),
+                        export_path=str(export_path),
+                        algorithm="Average",
+                        output_name="Mix",
+                    ),
+                    subscriber=events.append,
+                )
+
+        self.assertEqual(result.algorithm, "Average")
+        self.assertTrue(result.output_path.endswith("Mix_(Average).wav"))
+        self.assertEqual(called["audio_inputs"], (str(input_a), str(input_b)))
+        self.assertEqual(called["audio_file_base"], "Mix")
+        self.assertTrue(called["is_manual_ensemble"])
+        self.assertTrue(any(isinstance(event, EnsembleResultEvent) for event in events))
+
+
+class CliEnsembleCommandTests(unittest.TestCase):
+    def test_ensemble_command_builds_request(self) -> None:
+        runner = CliRunner()
+        captured = {}
+        job = mock.Mock()
+
+        def fake_run(request, subscriber=None):
+            captured["request"] = request
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Preparing ensemble"))
+                subscriber(ProgressEvent(percent=100.0, current_file=2, total_files=2))
+            return SimpleNamespace(output_path="/tmp/out/Ensembled_(Average).wav")
+
+        job.run.side_effect = fake_run
+
+        with runner.isolated_filesystem():
+            input_a = Path("a.wav")
+            input_b = Path("b.wav")
+            output_dir = Path("out")
+            input_a.write_bytes(b"a")
+            input_b.write_bytes(b"b")
+            expected_input_paths = (str(input_a.resolve()), str(input_b.resolve()))
+            expected_output_path = str(output_dir.resolve())
+            with mock.patch("uvr_cli.__main__.EnsembleJob", return_value=job):
+                result = runner.invoke(
+                    cli,
+                    ["ensemble", "a.wav", "b.wav", "-o", "out", "--algorithm", "Average"],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            captured["request"],
+            EnsembleRequest(
+                input_paths=expected_input_paths,
+                export_path=expected_output_path,
+                algorithm="Average",
+                output_name="Ensembled",
+                save_format="WAV",
+                wav_type="PCM_16",
+                mp3_bitrate="320k",
+                normalize_output=False,
+                wav_ensemble=False,
+            ),
+        )
+        self.assertIn("Ensembled 2 input file(s).", result.output)
+
+    def test_ensemble_command_supports_json_progress(self) -> None:
+        runner = CliRunner()
+        job = mock.Mock()
+
+        def fake_run(_request, subscriber=None):
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Preparing ensemble"))
+                subscriber(ProgressEvent(percent=100.0, current_file=2, total_files=2))
+                subscriber(
+                    EnsembleResultEvent(
+                        output_path="/tmp/out/Ensembled_(Average).wav",
+                        inputs=("/tmp/a.wav", "/tmp/b.wav"),
+                        algorithm="Average",
+                    )
+                )
+            return SimpleNamespace(output_path="/tmp/out/Ensembled_(Average).wav")
+
+        job.run.side_effect = fake_run
+
+        with runner.isolated_filesystem():
+            Path("a.wav").write_bytes(b"a")
+            Path("b.wav").write_bytes(b"b")
+            with mock.patch("uvr_cli.__main__.EnsembleJob", return_value=job):
+                result = runner.invoke(
+                    cli,
+                    ["ensemble", "a.wav", "b.wav", "-o", "out", "--progress", "json"],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        output_lines = [json.loads(line) for line in result.output.strip().splitlines()]
+        self.assertEqual(output_lines[0]["event_type"], "status")
+        self.assertEqual(output_lines[1]["event_type"], "progress")
+        self.assertEqual(output_lines[2]["event_type"], "ensemble_result")
+
+
+class AudioToolJobTests(unittest.TestCase):
+    def test_audio_tool_job_runs_time_stretch(self) -> None:
+        job = AudioToolJob()
+        events = []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            export_path = tmp_path / "out"
+            input_a = tmp_path / "a.wav"
+            input_b = tmp_path / "b.wav"
+            input_a.write_bytes(b"a")
+            input_b.write_bytes(b"b")
+            called = []
+
+            class FakeAudioTools:
+                def __init__(self, audio_tool, settings):
+                    self.audio_tool = audio_tool
+                    self.settings = settings
+                    self.is_testing_audio = ""
+
+                def pitch_or_time_shift(self, audio_file, audio_file_base):
+                    called.append((audio_file, audio_file_base))
+
+            with mock.patch("uvr_core.jobs.AudioTools", FakeAudioTools):
+                result = job.run(
+                    AudioToolRequest(
+                        audio_tool=TIME_STRETCH,
+                        input_paths=(str(input_a), str(input_b)),
+                        export_path=str(export_path),
+                    ),
+                    subscriber=events.append,
+                )
+
+        self.assertEqual(result.audio_tool, TIME_STRETCH)
+        self.assertEqual(called, [(str(input_a), "a"), (str(input_b), "b")])
+        self.assertEqual(
+            result.output_paths,
+            (
+                str(export_path / "a_time_stretched.wav"),
+                str(export_path / "b_time_stretched.wav"),
+            ),
+        )
+        self.assertTrue(any(isinstance(event, AudioToolResultEvent) for event in events))
+
+    def test_audio_tool_job_runs_align(self) -> None:
+        job = AudioToolJob()
+        events = []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            export_path = tmp_path / "out"
+            input_a = tmp_path / "a.wav"
+            input_b = tmp_path / "b.wav"
+            input_a.write_bytes(b"a")
+            input_b.write_bytes(b"b")
+            called = {}
+
+            class FakeAudioTools:
+                def __init__(self, audio_tool, settings):
+                    self.audio_tool = audio_tool
+                    self.settings = settings
+                    self.is_testing_audio = ""
+
+                def align_inputs(self, audio_inputs, audio_file_base, audio_file_2_base, command_text, set_progress_bar):
+                    called["audio_inputs"] = tuple(audio_inputs)
+                    called["audio_file_base"] = audio_file_base
+                    called["audio_file_2_base"] = audio_file_2_base
+                    command_text("Processing files...")
+                    set_progress_bar(0.25, 0.5)
+
+            with mock.patch("uvr_core.jobs.AudioTools", FakeAudioTools):
+                result = job.run(
+                    AudioToolRequest(
+                        audio_tool=ALIGN_INPUTS,
+                        input_paths=(str(input_a), str(input_b)),
+                        export_path=str(export_path),
+                        save_aligned=True,
+                    ),
+                    subscriber=events.append,
+                )
+
+        self.assertEqual(called["audio_inputs"], (str(input_a), str(input_b)))
+        self.assertEqual(called["audio_file_base"], "a")
+        self.assertEqual(called["audio_file_2_base"], "b")
+        self.assertEqual(
+            result.output_paths,
+            (
+                str(export_path / "a_(Inverted).wav"),
+                str(export_path / "b_(Aligned).wav"),
+            ),
+        )
+        self.assertTrue(any(isinstance(event, ProgressEvent) and event.percent == 75.0 for event in events))
+
+
+class CliAudioToolCommandTests(unittest.TestCase):
+    def test_audio_tool_pitch_builds_request(self) -> None:
+        runner = CliRunner()
+        captured = {}
+        job = mock.Mock()
+
+        def fake_run(request, subscriber=None):
+            captured["request"] = request
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Processing 1/1"))
+                subscriber(ProgressEvent(percent=100.0, current_file=1, total_files=1))
+            return SimpleNamespace(output_paths=("/tmp/out/a_pitch_shifted.wav",))
+
+        job.run.side_effect = fake_run
+
+        with runner.isolated_filesystem():
+            Path("a.wav").write_bytes(b"a")
+            expected_input_paths = (str(Path("a.wav").resolve()),)
+            expected_output_path = str(Path("out").resolve())
+            with mock.patch("uvr_cli.__main__.AudioToolJob", return_value=job):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "audio-tool",
+                        "pitch",
+                        "a.wav",
+                        "-o",
+                        "out",
+                        "--rate",
+                        "3.5",
+                        "--no-time-correction",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            captured["request"],
+            AudioToolRequest(
+                audio_tool=CHANGE_PITCH,
+                input_paths=expected_input_paths,
+                export_path=expected_output_path,
+                save_format="WAV",
+                wav_type="PCM_16",
+                mp3_bitrate="320k",
+                normalize_output=False,
+                testing_audio=False,
+                align_window="3",
+                align_intro="Default",
+                db_analysis="Medium",
+                save_aligned=False,
+                match_silence=True,
+                spec_match=False,
+                phase_option="Automatic",
+                phase_shifts="None",
+                time_stretch_rate="3.5",
+                pitch_rate="3.5",
+                time_correction=False,
+            ),
+        )
+        self.assertIn("Change Pitch completed.", result.output)
+
+    def test_audio_tool_align_supports_json_progress(self) -> None:
+        runner = CliRunner()
+        job = mock.Mock()
+
+        def fake_run(_request, subscriber=None):
+            if subscriber is not None:
+                subscriber(StatusEvent(message="Preparing align inputs"))
+                subscriber(ProgressEvent(percent=60.0, current_file=2, total_files=2))
+                subscriber(
+                    AudioToolResultEvent(
+                        audio_tool=ALIGN_INPUTS,
+                        output_paths=("/tmp/out/a_(Inverted).wav",),
+                        inputs=("/tmp/a.wav", "/tmp/b.wav"),
+                    )
+                )
+            return SimpleNamespace(output_paths=("/tmp/out/a_(Inverted).wav",))
+
+        job.run.side_effect = fake_run
+
+        with runner.isolated_filesystem():
+            Path("a.wav").write_bytes(b"a")
+            Path("b.wav").write_bytes(b"b")
+            with mock.patch("uvr_cli.__main__.AudioToolJob", return_value=job):
+                result = runner.invoke(
+                    cli,
+                    ["audio-tool", "align", "a.wav", "b.wav", "-o", "out", "--progress", "json"],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        output_lines = [json.loads(line) for line in result.output.strip().splitlines()]
+        self.assertEqual(output_lines[0]["event_type"], "status")
+        self.assertEqual(output_lines[1]["event_type"], "progress")
+        self.assertEqual(output_lines[2]["event_type"], "audio_tool_result")
+
+    def test_audio_tool_match_builds_request(self) -> None:
+        runner = CliRunner()
+        captured = {}
+        job = mock.Mock()
+
+        def fake_run(request, subscriber=None):
+            captured["request"] = request
+            return SimpleNamespace(output_paths=("/tmp/out/a_(Matched).wav",))
+
+        job.run.side_effect = fake_run
+
+        with runner.isolated_filesystem():
+            Path("a.wav").write_bytes(b"a")
+            Path("b.wav").write_bytes(b"b")
+            expected_input_paths = (str(Path("a.wav").resolve()), str(Path("b.wav").resolve()))
+            with mock.patch("uvr_cli.__main__.AudioToolJob", return_value=job):
+                result = runner.invoke(cli, ["audio-tool", "match", "a.wav", "b.wav", "-o", "out"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["request"].audio_tool, MATCH_INPUTS)
+        self.assertEqual(captured["request"].input_paths, expected_input_paths)
 
 
 class AppStateConversionTests(unittest.TestCase):
