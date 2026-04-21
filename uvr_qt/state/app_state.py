@@ -9,6 +9,12 @@ from typing import Any, Mapping
 from gui_data.constants import DEFAULT_DATA
 from uvr.config.models import AppSettings
 from uvr.config.persistence import load_settings
+from uvr_core.requests import (
+    ModelSelectionRequest,
+    OutputSettingsRequest,
+    ProcessingOptionsRequest,
+    SeparationRequest,
+)
 
 
 @dataclass(frozen=True)
@@ -253,6 +259,45 @@ class AppState:
         )
         payload.update(self.models.secondary_models)
         return payload
+
+    def to_separation_request(self) -> SeparationRequest:
+        """Convert the Qt view model into the framework-neutral backend request."""
+        return SeparationRequest(
+            input_paths=self.paths.input_paths,
+            export_path=self.paths.export_path,
+            models=ModelSelectionRequest(
+                vr_model=self.models.vr_model,
+                mdx_net_model=self.models.mdx_net_model,
+                demucs_model=self.models.demucs_model,
+                demucs_pre_proc_model=self.models.demucs_pre_proc_model,
+                vocal_splitter_model=self.models.vocal_splitter_model,
+                demucs_stems=self.models.demucs_stems,
+                mdx_stems=self.models.mdx_stems,
+                secondary_models=dict(self.models.secondary_models),
+            ),
+            output=OutputSettingsRequest(
+                save_format=self.output.save_format,
+                wav_type=self.output.wav_type,
+                mp3_bitrate=self.output.mp3_bitrate,
+                add_model_name=self.output.add_model_name,
+                create_model_folder=self.output.create_model_folder,
+            ),
+            options=ProcessingOptionsRequest(
+                process_method=self.processing.process_method,
+                audio_tool=self.processing.audio_tool,
+                algorithm=self.processing.algorithm,
+                device=self.processing.device,
+                use_gpu=self.processing.use_gpu,
+                primary_stem_only=self.processing.primary_stem_only,
+                secondary_stem_only=self.processing.secondary_stem_only,
+                normalize_output=self.processing.normalize_output,
+                wav_ensemble=self.processing.wav_ensemble,
+                testing_audio=self.processing.testing_audio,
+                model_sample_mode=self.processing.model_sample_mode,
+                model_sample_duration=self.processing.model_sample_duration,
+            ),
+            extra_settings=dict(self.extra_settings),
+        )
 
 def load_app_state(data_file: str | Path = "data.pkl") -> AppState:
     """Load persisted settings into the new Qt state model."""
