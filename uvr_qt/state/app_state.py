@@ -398,7 +398,7 @@ class AppState:
             extra_settings=dict(self.extra_settings),
         )
 
-def load_app_state(data_file: str | Path = "data.pkl") -> AppState:
+def load_app_state(data_file: str | Path = "config.yaml") -> AppState:
     """Load persisted settings into the new Qt state model."""
     settings = load_settings(default_data=DEFAULT_DATA, data_file=data_file)
     return AppState.from_settings(settings)

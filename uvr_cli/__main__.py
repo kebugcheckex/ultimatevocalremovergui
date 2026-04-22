@@ -2,7 +2,7 @@
 
 Thin wrapper around :class:`uvr_core.jobs.SeparationJob` and
 :class:`uvr_core.jobs.DownloadJob`. Builds framework-neutral requests from CLI
-flags (seeded with persisted defaults when ``data.pkl`` is present) and runs
+flags (seeded with persisted defaults when ``config.yaml`` is present) and runs
 backend jobs without importing UI adapters.
 """
 
@@ -323,7 +323,7 @@ def config_group() -> None:
 @click.argument("key", required=False)
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file to read.",
@@ -359,7 +359,7 @@ def config_show(key: str | None, data_file: str, as_json: bool) -> None:
 @click.argument("value")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file to update.",
@@ -734,7 +734,7 @@ def audio_tool_group() -> None:
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -807,7 +807,7 @@ def audio_tool_time_stretch(
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -884,7 +884,7 @@ def audio_tool_pitch(
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -966,7 +966,7 @@ def audio_tool_align(
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -1055,7 +1055,7 @@ def audio_tool_match(
 @click.option("--model-folder/--no-model-folder", "create_model_folder", default=None, help="Group outputs in per-model subdirectories.")
 @click.option(
     "--data-file",
-    default="data.pkl",
+    default="config.yaml",
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",

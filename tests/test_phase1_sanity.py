@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -11,9 +12,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import yaml
 from click.testing import CliRunner
 from gui_data.constants import ALIGN_INPUTS, CHANGE_PITCH, DEFAULT_DATA, MATCH_INPUTS, TIME_STRETCH, VR_ARCH_PM
 from uvr.config.models import AppSettings
+from uvr.config.persistence import DEFAULT_DATA_FILE, load_settings, save_settings
 from uvr.runtime import RuntimePaths, build_runtime_paths
 from uvr.services.cache import SourceCache
 from uvr.services.catalog import ModelCatalog, discover_models, list_installed_models
@@ -67,6 +70,41 @@ class RuntimePathsTests(unittest.TestCase):
             self.assertEqual(paths.models_dir, custom_models.resolve())
             self.assertEqual(paths.vr_models_dir, custom_models.resolve() / "VR_Models")
             self.assertEqual(paths.mdx_model_name_select, custom_models.resolve() / "MDX_Net_Models" / "model_data" / "model_name_mapper.json")
+
+
+class PersistenceTests(unittest.TestCase):
+    def test_save_settings_writes_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            data_file = Path(tmp_dir) / "config.yaml"
+            settings = AppSettings.from_legacy_dict(DEFAULT_DATA, DEFAULT_DATA)
+
+            save_settings(settings, data_file=data_file)
+
+            payload = yaml.safe_load(data_file.read_text(encoding="utf-8"))
+            self.assertIsInstance(payload, dict)
+            self.assertEqual(payload["save_format"], DEFAULT_DATA["save_format"])
+
+    def test_load_settings_migrates_legacy_pickle_to_yaml_default_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            legacy_file = tmp_path / "data.pkl"
+            legacy_payload = dict(DEFAULT_DATA)
+            legacy_payload["save_format"] = "MP3"
+
+            with legacy_file.open("wb") as handle:
+                pickle.dump(legacy_payload, handle)
+
+            with mock.patch("uvr.config.persistence.DEFAULT_DATA_FILE", tmp_path / "config.yaml"), mock.patch(
+                "uvr.config.persistence.LEGACY_DATA_FILE",
+                legacy_file,
+            ):
+                settings = load_settings(default_data=DEFAULT_DATA)
+
+            self.assertEqual(settings.to_legacy_dict()["save_format"], "MP3")
+            migrated_file = tmp_path / "config.yaml"
+            self.assertTrue(migrated_file.is_file())
+            migrated_payload = yaml.safe_load(migrated_file.read_text(encoding="utf-8"))
+            self.assertEqual(migrated_payload["save_format"], "MP3")
 
 
 class CatalogServiceTests(unittest.TestCase):

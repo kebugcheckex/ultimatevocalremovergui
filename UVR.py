@@ -187,11 +187,11 @@ def close_process(q:queue.Queue):
     thread = KThread(target=close_splash)
     thread.start()
 
-def save_data(data, data_file='data.pkl'):
+def save_data(data, data_file='config.yaml'):
     """Compatibility wrapper for extracted persistence helper."""
     persistence_helpers.save_data(data=data, data_file=data_file)
 
-def load_data(default_data=DEFAULT_DATA, data_file='data.pkl') -> dict:
+def load_data(default_data=DEFAULT_DATA, data_file='config.yaml') -> dict:
     """Compatibility wrapper for extracted persistence helper."""
     return persistence_helpers.load_data(default_data=default_data, data_file=data_file)
 

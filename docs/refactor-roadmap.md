@@ -13,7 +13,7 @@ Rewrite the GUI on PySide6 and ship a CLI with similar functionality, built on a
 3. Long-running work is async-friendly: progress/log/status travel over callbacks or event streams, not widget mutation.
 4. Persistence lives in one place with a typed interface and a migration path off the legacy pickle.
 5. No hidden Tk/Qt imports in `uvr/` (domain/services/config). If it imports a UI toolkit, it does not belong under `uvr/`.
-6. Backwards compatibility with the legacy `data.pkl` is preserved until the Qt frontend ships; after that, a migration utility can replace it.
+6. Persistence changes should preserve a compatibility path from the legacy `data.pkl` long enough to migrate existing installs safely.
 
 ## Target Architecture
 
@@ -52,7 +52,9 @@ Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_
 - `uvr_qt/` now has a runnable PySide6 shell via `python -m uvr_qt.app`, typed app state, a main window, and a thin processing facade over `uvr_core`.
 - The Qt main workflow now supports input/output selection, process-method/model selection, start/cancel, progress/log display, persistence through `uvr/config`, and a collapsible advanced-controls panel for VR/MDX/Demucs settings.
 - The Qt window also now exposes MDX/Demucs stem targeting plus first-pass workflow-composition controls for Demucs pre-proc and vocal-splitter selection using shared `uvr_core` resolver hooks.
-- Full Tk parity is not reached: per-stem secondary-model assignment/scales, download manager UI, audio-tool UI, ensemble helpers, and the remaining popup-driven workflows still live outside the Qt frontend.
+- `uvr_qt/` now also has a separate download-manager window backed by `uvr_core.jobs.DownloadJob`, covering catalog refresh, VIP code entry, model-type filtering, download progress, and logs.
+- Persistence now defaults to YAML (`config.yaml`) with compatibility loading from legacy `data.pkl` and one-shot migration on first read of the new default path.
+- Full Tk parity is not reached: per-stem secondary-model assignment/scales, audio-tool UI, ensemble helpers, model/default editors, and the remaining popup-driven workflows still live outside the Qt frontend.
 - `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
 - Downloads, cache, model catalog, ensemble, and audio tools are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state for the legacy app shell.
 
@@ -131,6 +133,7 @@ Current progress:
 - `uvr_qt/ui/main_window.py` now supports the primary separation shell: input/output selection, model reloading, output/tuning controls, processing progress/logs, and cancellation.
 - `uvr_core.jobs.SeparationJob` now supports cancellation and auxiliary-model resolution for the Qt adapter.
 - The Qt advanced panel now covers VR/MDX/Demucs numeric controls, MDX/Demucs stem selection, and first-pass workflow composition for Demucs pre-proc and vocal-splitter selection.
+- `uvr_qt/ui/download_manager_window.py` now provides a separate download-manager window wired to the shared download/catalog job surface.
 
 Still missing before Phase 4 can be called done:
 
@@ -147,12 +150,16 @@ Still missing before Phase 4 can be called done:
 - Ensemble helpers, saved settings profiles, help/about/error dialogs.
 - Audio-tool panels.
 
+Current progress:
+
+- the download manager piece has started: Qt now has a separate window for catalog refresh and model downloads on top of `uvr_core.jobs.DownloadJob`
+
 **Exit:** Tk `UVR.py` is no longer needed for any supported workflow.
 
 ### Phase 6 — Retire Tk
 
 - Delete `UVR.py` and `uvr/ui/` (Tk-only modules).
-- Migrate persistence off `data.pkl` (typed JSON/TOML under `uvr/config/persistence.py`) with a one-shot migration run at first launch.
+- Finish the persistence migration off raw pickle. The repo now defaults to YAML-backed `config.yaml` with compatibility loading from legacy `data.pkl`, but the Tk shell and docs still need to be fully normalized around the new format.
 - Mark `uvr_core` as stable; document the public surface.
 
 **Exit:** a fresh clone of the repo contains no `tkinter` imports.
@@ -195,12 +202,12 @@ Whatever event schema `uvr_core/events.py` ships with will be what a future web 
 - **Risk:** over-fitting the schema to current Qt/CLI needs; missing fields (e.g. structured error codes, per-stage timing) that a web UI would want.
 - **Mitigation:** sketch a JSON form of the event stream before Phase 1 is locked; make events dataclasses with `to_dict()` and explicit type discriminators.
 
-### 4. Pickle persistence
+### 4. Persistence migration and compatibility
 
 `data.pkl` is a raw pickle of a dict. Any change to `DEFAULT_DATA` or Python version can break it.
 
 - **Risk:** a GUI/CLI that reads `data.pkl` may load arbitrary attacker-controlled objects if the file is shared.
-- **Mitigation:** Phase 6 replaces it with a typed JSON/TOML layer; until then, treat `data.pkl` as untrusted and only read fields listed in `AppSettings`.
+- **Mitigation:** the codebase now defaults to YAML-backed `config.yaml` and can migrate legacy pickle settings on read; the remaining work is to finish normalizing the surrounding UX/docs and eventually remove pickle compatibility when it is safe to do so.
 
 ### 5. Cancellation and concurrency
 
