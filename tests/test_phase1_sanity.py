@@ -25,7 +25,18 @@ from uvr.services.downloads import (
     validate_vip_code,
 )
 from uvr_core.events import AudioToolResultEvent, DownloadResultEvent, EnsembleResultEvent, LogEvent, ProgressEvent, ResultEvent, StatusEvent
-from uvr_core.jobs import AudioToolJob, DownloadJob, EnsembleJob, JobCancelledError, ResolvedModel, SeparationJob
+from uvr_core.jobs import (
+    AudioToolJob,
+    AvailableDownloads,
+    AudioToolJobResult,
+    CatalogRefreshResult,
+    DownloadJob,
+    DownloadJobResult,
+    EnsembleJob,
+    JobCancelledError,
+    ResolvedModel,
+    SeparationJob,
+)
 from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
 from uvr_cli.__main__ import cli
 from uvr_qt.state.app_state import (
@@ -1451,6 +1462,39 @@ class MainWindowTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_download_button_opens_separate_window(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                self.assertIsNone(window.download_manager_window)
+                window._open_download_manager()
+                self.assertIsNotNone(window.download_manager_window)
+                self.assertEqual(window.download_manager_window.windowTitle(), "Model Downloads")
+            finally:
+                if window.download_manager_window is not None:
+                    window.download_manager_window.close()
+                window.close()
+
     def test_advanced_controls_are_collapsible_and_method_specific(self) -> None:
         from uvr_core.jobs import ResolvedModel
         from uvr_qt.services.processing_facade import ProcessingFacade
@@ -1532,6 +1576,60 @@ class MainWindowTests(unittest.TestCase):
                 self.assertTrue(window.state.extra_settings["is_set_vocal_splitter"])
             finally:
                 window.close()
+
+
+class DownloadManagerWindowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_refresh_finished_updates_catalog_view(self) -> None:
+        from uvr_qt.ui.download_manager_window import DownloadManagerWindow
+
+        class FakeFacade:
+            def refresh_catalog(self, *, vip_code: str = "", refresh_model_settings: bool = True):
+                return CatalogRefreshResult(
+                    available_downloads=AvailableDownloads(
+                        bulletin="hello",
+                        vr_items=("VR One",),
+                        mdx_items=("MDX One",),
+                        demucs_items=("Demucs One",),
+                        decoded_vip_link="",
+                    ),
+                    refreshed_settings=None,
+                )
+
+        window = DownloadManagerWindow(download_facade=FakeFacade())
+        try:
+            result = FakeFacade().refresh_catalog()
+            window._refresh_finished(result)
+            self.assertEqual(window.bulletin_field.toPlainText(), "hello")
+            self.assertEqual(window.item_list.count(), 1)
+            self.assertEqual(window.item_list.item(0).text(), "VR One")
+        finally:
+            window.close()
+
+    def test_model_type_switch_updates_available_items(self) -> None:
+        from uvr_qt.ui.download_manager_window import DownloadManagerWindow
+
+        window = DownloadManagerWindow(download_facade=mock.Mock())
+        try:
+            window.current_downloads = AvailableDownloads(
+                bulletin=None,
+                vr_items=("VR One",),
+                mdx_items=("MDX One", "MDX Two"),
+                demucs_items=("Demucs One",),
+                decoded_vip_link="",
+            )
+            window.model_type_combo.setCurrentText("MDX-Net")
+            window._refresh_list()
+            self.assertEqual(window.item_list.count(), 2)
+            self.assertEqual(window.item_list.item(1).text(), "MDX Two")
+        finally:
+            window.close()
 
 
 if __name__ == "__main__":

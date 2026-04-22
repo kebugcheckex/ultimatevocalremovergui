@@ -52,6 +52,7 @@ from uvr.config.models import AppSettings
 from uvr.config.persistence import save_settings
 from uvr_qt.services import JobCancelledError, ProcessResult, ProcessingFacade
 from uvr_qt.state import AppState
+from uvr_qt.ui.download_manager_window import DownloadManagerWindow
 
 
 class MainWindow(QMainWindow):
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.state = state
         self.processing_facade: ProcessingFacade | None = processing_facade
+        self.download_manager_window: DownloadManagerWindow | None = None
         self.processing_thread: QThread | None = None
         self.processing_worker: _ProcessingWorker | None = None
         self._is_syncing_processing_controls = False
@@ -97,8 +99,18 @@ class MainWindow(QMainWindow):
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #5f6b7a;")
 
+        actions = QWidget(header)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(8)
+        actions_layout.addStretch(1)
+        self.open_download_manager_button = QPushButton("Downloads", actions)
+        self.open_download_manager_button.clicked.connect(self._open_download_manager)
+        actions_layout.addWidget(self.open_download_manager_button)
+
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addWidget(actions)
         return header
 
     def _build_paths_group(self) -> QGroupBox:
@@ -1120,6 +1132,13 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str) -> None:
         self._set_runtime(log_lines=self.state.runtime.log_lines + (message,))
+
+    def _open_download_manager(self) -> None:
+        if self.download_manager_window is None:
+            self.download_manager_window = DownloadManagerWindow()
+        self.download_manager_window.show()
+        self.download_manager_window.raise_()
+        self.download_manager_window.activateWindow()
 
     def _sync_log_console(self) -> None:
         desired = "\n".join(self.state.runtime.log_lines)
