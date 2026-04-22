@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from threading import Event as ThreadEvent
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -19,6 +20,7 @@ from gui_data.constants import (
     DEMUCS_OVERLAP,
     DEF_OPT,
     INTRO_MAPPER,
+    ENSEMBLE_PARTITION,
     MATCH_INPUTS,
     MDX_OVERLAP,
     MDX23_OVERLAP,
@@ -114,6 +116,10 @@ class AudioToolJobResult:
     inputs: tuple[str, ...]
 
 
+class JobCancelledError(RuntimeError):
+    """Raised when a long-running backend job is cancelled."""
+
+
 EventSubscriber = Callable[[Event], None]
 
 
@@ -122,6 +128,10 @@ class SeparationJob:
 
     def __init__(self) -> None:
         self.catalog = load_model_catalog()
+        self._cancel_requested = ThreadEvent()
+
+    def cancel(self) -> None:
+        self._cancel_requested.set()
 
     def available_process_methods(self) -> tuple[str, ...]:
         methods = []
@@ -135,6 +145,13 @@ class SeparationJob:
             model.model_name
             for model in self._available_models()
             if model.process_method == process_method
+        )
+
+    def available_tagged_models_for_methods(self, process_methods: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(
+            f"{model.process_method}{ENSEMBLE_PARTITION}{model.model_name}"
+            for model in self._available_models()
+            if model.process_method in process_methods
         )
 
     def resolve_model(self, request: SeparationRequest) -> ResolvedModel | None:
@@ -172,6 +189,7 @@ class SeparationJob:
         *,
         subscriber: EventSubscriber | None = None,
     ) -> ProcessResult:
+        self._cancel_requested.clear()
         resolved_model = self.resolve_model(request)
         if resolved_model is None:
             raise RuntimeError("No compatible backend models were found in the local models directories.")
@@ -195,6 +213,7 @@ class SeparationJob:
 
         try:
             for index, audio_file in enumerate(input_paths, start=1):
+                self._check_cancelled()
                 if not Path(audio_file).is_file():
                     raise RuntimeError(f'Input file does not exist: "{audio_file}"')
 
@@ -247,6 +266,7 @@ class SeparationJob:
 
                 separator = self._create_separator(model, process_data)
                 separator.seperate()
+                self._check_cancelled()
                 clear_gpu_cache()
                 processed.append(audio_file)
                 self._emit(
@@ -276,6 +296,11 @@ class SeparationJob:
                 ),
             )
             return result
+        except JobCancelledError:
+            clear_gpu_cache()
+            self._emit(subscriber, StatusEvent(message="Cancelled"))
+            self._emit(subscriber, LogEvent(message="Processing cancelled."))
+            raise
         except Exception:
             clear_gpu_cache()
             raise
@@ -283,6 +308,10 @@ class SeparationJob:
     def _emit(self, subscriber: EventSubscriber | None, event: Event) -> None:
         if subscriber is not None:
             subscriber(event)
+
+    def _check_cancelled(self) -> None:
+        if self._cancel_requested.is_set():
+            raise JobCancelledError("Processing cancelled.")
 
     def _available_models(self) -> list[ResolvedModel]:
         return [
@@ -294,17 +323,36 @@ class SeparationJob:
             for model in list_installed_models(self.catalog)
         ]
 
-    def _build_model(self, resolved_model: ResolvedModel, request: SeparationRequest) -> ModelData:
+    def _build_model(
+        self,
+        resolved_model: ResolvedModel,
+        request: SeparationRequest,
+        *,
+        is_secondary_model: bool = False,
+        primary_model_primary_stem: str | None = None,
+        is_primary_model_primary_stem_only: bool = False,
+        is_primary_model_secondary_stem_only: bool = False,
+        is_pre_proc_model: bool = False,
+        is_vocal_split_model: bool = False,
+    ) -> ModelData:
         return ModelData(
             resolved_model.model_name,
             selected_process_method=VR_ARCH_TYPE if resolved_model.process_method == VR_ARCH_PM else resolved_model.process_method,
+            is_secondary_model=is_secondary_model,
+            primary_model_primary_stem=primary_model_primary_stem,
+            is_primary_model_primary_stem_only=is_primary_model_primary_stem_only,
+            is_primary_model_secondary_stem_only=is_primary_model_secondary_stem_only,
+            is_pre_proc_model=is_pre_proc_model,
+            is_vocal_split_model=is_vocal_split_model,
             settings=self._build_settings(resolved_model.process_method, request),
-            resolvers=self._build_resolvers(),
+            resolvers=self._build_resolvers(request),
         )
 
     def _build_settings(self, process_method: str, request: SeparationRequest) -> ModelDataSettings:
         output_settings = request.output
         processing_settings = request.options
+        advanced = request.advanced
+        extra_settings = request.extra_settings
         return ModelDataSettings(
             device_set=DEFAULT,
             is_deverb_vocals=False,
@@ -319,10 +367,10 @@ class SeparationJob:
             is_secondary_stem_only_demucs=processing_settings.secondary_stem_only,
             denoise_option=DENOISE_NONE,
             is_mdx_c_seg_def=False,
-            mdx_batch_size=DEF_OPT,
-            mdxnet_stems=ALL_STEMS,
-            overlap=str(DEMUCS_OVERLAP[0]),
-            overlap_mdx=str(MDX_OVERLAP[0]),
+            mdx_batch_size=advanced.mdx_batch_size,
+            mdxnet_stems=request.models.mdx_stems or ALL_STEMS,
+            overlap=str(advanced.overlap or DEMUCS_OVERLAP[0]),
+            overlap_mdx=str(advanced.overlap_mdx or MDX_OVERLAP[0]),
             overlap_mdx23=str(MDX23_OVERLAP[6]),
             semitone_shift="0",
             is_match_frequency_pitch=True,
@@ -331,33 +379,33 @@ class SeparationJob:
             mp3_bit_set=output_settings.mp3_bitrate,
             save_format=output_settings.save_format or WAV,
             is_invert_spec=False,
-            demucs_stems=ALL_STEMS,
+            demucs_stems=request.models.demucs_stems or ALL_STEMS,
             is_demucs_combine_stems=True,
             chosen_process_method=VR_ARCH_TYPE if process_method == VR_ARCH_PM else process_method,
-            is_save_inst_set_vocal_splitter=False,
+            is_save_inst_set_vocal_splitter=bool(extra_settings.get("is_save_inst_set_vocal_splitter", False)),
             ensemble_main_stem="",
             vr_is_secondary_model_activate=False,
-            aggression_setting=5,
-            is_tta=False,
-            is_post_process=False,
-            window_size=512,
-            batch_size=DEF_OPT,
-            crop_size=256,
-            is_high_end_process=False,
-            post_process_threshold=0.2,
+            aggression_setting=advanced.aggression_setting,
+            is_tta=advanced.is_tta,
+            is_post_process=advanced.is_post_process,
+            window_size=advanced.window_size,
+            batch_size=advanced.batch_size,
+            crop_size=advanced.crop_size,
+            is_high_end_process=advanced.is_high_end_process,
+            post_process_threshold=advanced.post_process_threshold,
             vr_hash_mapper=self.catalog.vr_hash_mapper,
             mdx_is_secondary_model_activate=False,
-            margin=44100,
-            mdx_segment_size=256,
+            margin=advanced.margin,
+            mdx_segment_size=advanced.mdx_segment_size,
             mdx_hash_mapper=self.catalog.mdx_hash_mapper,
-            compensate=AUTO_SELECT,
+            compensate=advanced.compensate or AUTO_SELECT,
             demucs_is_secondary_model_activate=False,
-            is_demucs_pre_proc_model_activate=False,
-            is_demucs_pre_proc_model_inst_mix=False,
-            margin_demucs=44100,
-            shifts=2,
+            is_demucs_pre_proc_model_activate=bool(extra_settings.get("is_demucs_pre_proc_model_activate", False)),
+            is_demucs_pre_proc_model_inst_mix=bool(extra_settings.get("is_demucs_pre_proc_model_inst_mix", False)),
+            margin_demucs=advanced.margin_demucs,
+            shifts=advanced.shifts,
             is_split_mode=True,
-            segment=DEF_OPT,
+            segment=advanced.segment or DEF_OPT,
             is_chunk_demucs=False,
             mdx_name_select_mapper=self.catalog.mdx_name_select_mapper,
             demucs_name_select_mapper=self.catalog.demucs_name_select_mapper,
@@ -370,15 +418,59 @@ class SeparationJob:
             return "DOUBLE" if save_format == WAV else "FLOAT"
         return wav_type or "PCM_16"
 
-    def _build_resolvers(self) -> ModelDataResolvers:
+    def _build_resolvers(self, request: SeparationRequest) -> ModelDataResolvers:
         return ModelDataResolvers(
             return_ensemble_stems=lambda: ("", ""),
             check_only_selection_stem=lambda _check_type: False,
             determine_secondary_model=lambda *_args: (None, None),
-            determine_demucs_pre_proc_model=lambda _primary_stem=None: None,
-            determine_vocal_split_model=lambda: None,
+            determine_demucs_pre_proc_model=lambda primary_stem=None: self._determine_demucs_pre_proc_model(
+                request,
+                primary_stem=primary_stem,
+            ),
+            determine_vocal_split_model=lambda: self._determine_vocal_split_model(request),
             resolve_popup_model_data=lambda *_args: None,
         )
+
+    def _resolve_tagged_model(self, tagged_name: str) -> ResolvedModel | None:
+        process_method, separator, model_name = tagged_name.partition(ENSEMBLE_PARTITION)
+        if not separator or not model_name:
+            return None
+        for candidate in self._available_models():
+            if candidate.process_method == process_method and candidate.model_name == model_name:
+                return candidate
+        return None
+
+    def _determine_demucs_pre_proc_model(
+        self,
+        request: SeparationRequest,
+        *,
+        primary_stem: str | None = None,
+    ) -> ModelData | None:
+        if not bool(request.extra_settings.get("is_demucs_pre_proc_model_activate", False)):
+            return None
+        resolved_model = self._resolve_tagged_model(request.models.demucs_pre_proc_model)
+        if resolved_model is None:
+            return None
+        model = self._build_model(
+            resolved_model,
+            request,
+            primary_model_primary_stem=primary_stem,
+            is_pre_proc_model=True,
+        )
+        return model if model.model_status else None
+
+    def _determine_vocal_split_model(self, request: SeparationRequest) -> ModelData | None:
+        if not bool(request.extra_settings.get("is_set_vocal_splitter", False)):
+            return None
+        resolved_model = self._resolve_tagged_model(request.models.vocal_splitter_model)
+        if resolved_model is None:
+            return None
+        model = self._build_model(
+            resolved_model,
+            request,
+            is_vocal_split_model=True,
+        )
+        return model if model.model_status else None
 
     def _build_process_data(
         self,
@@ -395,11 +487,13 @@ class SeparationJob:
         progress_step = {"count": 0}
 
         def write_to_console(text: str, base_text: str = "") -> None:
+            self._check_cancelled()
             message = f"{base_text}{text}".rstrip()
             if message:
                 self._emit(subscriber, LogEvent(message=message))
 
         def process_iteration() -> None:
+            self._check_cancelled()
             progress_step["count"] += 1
             fractional = min(progress_step["count"] * 10.0, 90.0)
             self._emit(
@@ -412,6 +506,7 @@ class SeparationJob:
             )
 
         def set_progress_bar(step: float, inference_iterations: float = 0.0) -> None:
+            self._check_cancelled()
             partial = min(max(float(step + inference_iterations), 0.0), 1.0)
             self._emit(
                 subscriber,

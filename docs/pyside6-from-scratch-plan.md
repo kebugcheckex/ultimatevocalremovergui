@@ -307,6 +307,12 @@ Success criteria:
 
 - primary separation workflow works end-to-end
 
+Current implementation status:
+
+- done for the first Qt release slice
+- `uvr_qt/` now launches, loads persisted settings, runs separation through `uvr_core`, shows progress/log output, and supports cancellation through the shared job layer
+- output/tuning controls and typed state synchronization are in place
+
 ### Phase D: Advanced Controls
 
 Deliverables:
@@ -318,6 +324,20 @@ Deliverables:
 Success criteria:
 
 - users can run meaningful non-default workflows without old Tk menus
+
+Current implementation status:
+
+- partially complete
+- a collapsible advanced-controls section now exists in the Qt window
+- VR, MDX, and Demucs numeric/tuning controls are wired through typed Qt state into `uvr_core`
+- MDX/Demucs stem targeting is surfaced in the Qt UI
+- first-pass workflow-composition controls for Demucs pre-proc and vocal splitter are surfaced in the Qt UI
+
+Still missing:
+
+- per-stem secondary-model selection and scaling
+- parity for the more complex popup-driven composition/edit flows from Tk
+- stronger validation and UX around incompatible advanced combinations
 
 ### Phase E: Secondary Features
 

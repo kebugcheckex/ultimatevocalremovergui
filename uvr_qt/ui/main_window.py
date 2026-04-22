@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QFileDialog,
+    QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -20,25 +21,46 @@ from PySide6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QProgressBar,
+    QToolButton,
+    QSpinBox,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from gui_data.constants import DEFAULT_DATA, FLAC, MP3, WAV, WAV_TYPE
+from gui_data.constants import (
+    AUTO_SELECT,
+    ALL_STEMS,
+    BATCH_SIZE,
+    DEFAULT_DATA,
+    DEF_OPT,
+    DEMUCS_OVERLAP,
+    DEMUCS_SEGMENTS,
+    FLAC,
+    MDX_OVERLAP,
+    MDX_SEGMENTS,
+    MP3,
+    MP3_BIT_RATES,
+    NO_MODEL,
+    STEM_SET_MENU,
+    VR_AGGRESSION,
+    VR_WINDOW,
+    WAV,
+    WAV_TYPE,
+)
 from uvr.config.models import AppSettings
 from uvr.config.persistence import save_settings
-from uvr_qt.services import ProcessResult, ProcessingFacade
+from uvr_qt.services import JobCancelledError, ProcessResult, ProcessingFacade
 from uvr_qt.state import AppState
 
 
 class MainWindow(QMainWindow):
     """Basic Qt shell with input/output path selection."""
 
-    def __init__(self, state: AppState):
+    def __init__(self, state: AppState, processing_facade: ProcessingFacade | None = None):
         super().__init__()
         self.state = state
-        self.processing_facade: ProcessingFacade | None = None
+        self.processing_facade: ProcessingFacade | None = processing_facade
         self.processing_thread: QThread | None = None
         self.processing_worker: _ProcessingWorker | None = None
         self._is_syncing_processing_controls = False
@@ -180,7 +202,10 @@ class MainWindow(QMainWindow):
         button_layout.setSpacing(8)
         self.process_button = QPushButton("Process with GPU")
         self.process_button.clicked.connect(self._start_processing)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self._cancel_processing)
         button_layout.addWidget(self.process_button)
+        button_layout.addWidget(self.cancel_button)
         button_layout.addStretch(1)
 
         self.progress_bar = QProgressBar(group)
@@ -209,6 +234,11 @@ class MainWindow(QMainWindow):
         self.wav_type_combo.addItems(list(WAV_TYPE))
         self.wav_type_combo.currentTextChanged.connect(self._on_wav_type_changed)
 
+        mp3_bitrate_label = QLabel("MP3 Bitrate")
+        self.mp3_bitrate_combo = QComboBox(output_group)
+        self.mp3_bitrate_combo.addItems(list(MP3_BIT_RATES))
+        self.mp3_bitrate_combo.currentTextChanged.connect(self._on_mp3_bitrate_changed)
+
         self.add_model_name_checkbox = QCheckBox("Append model name", output_group)
         self.add_model_name_checkbox.toggled.connect(self._on_add_model_name_changed)
 
@@ -232,17 +262,34 @@ class MainWindow(QMainWindow):
         self.secondary_stem_only_checkbox = QCheckBox("Secondary stem only", tuning_group)
         self.secondary_stem_only_checkbox.toggled.connect(self._on_secondary_stem_only_changed)
 
+        self.testing_audio_checkbox = QCheckBox("Testing audio mode", tuning_group)
+        self.testing_audio_checkbox.toggled.connect(self._on_testing_audio_changed)
+
+        self.model_sample_mode_checkbox = QCheckBox("Sample mode", tuning_group)
+        self.model_sample_mode_checkbox.toggled.connect(self._on_model_sample_mode_changed)
+
+        self.model_sample_duration_spinbox = QSpinBox(tuning_group)
+        self.model_sample_duration_spinbox.setRange(1, 600)
+        self.model_sample_duration_spinbox.setSuffix(" sec")
+        self.model_sample_duration_spinbox.valueChanged.connect(self._on_model_sample_duration_changed)
+
         tuning_layout.addWidget(self.gpu_checkbox, 0, 0)
         tuning_layout.addWidget(self.normalize_checkbox, 0, 1)
         tuning_layout.addWidget(self.primary_stem_only_checkbox, 1, 0)
         tuning_layout.addWidget(self.secondary_stem_only_checkbox, 1, 1)
+        tuning_layout.addWidget(self.testing_audio_checkbox, 2, 0)
+        tuning_layout.addWidget(self.model_sample_mode_checkbox, 2, 1)
+        tuning_layout.addWidget(QLabel("Sample Duration"), 3, 0)
+        tuning_layout.addWidget(self.model_sample_duration_spinbox, 3, 1)
 
         output_layout.addWidget(output_format_label, 0, 0)
         output_layout.addWidget(self.save_format_combo, 0, 1)
         output_layout.addWidget(wav_type_label, 1, 0)
         output_layout.addWidget(self.wav_type_combo, 1, 1)
-        output_layout.addWidget(self.add_model_name_checkbox, 2, 0, 1, 2)
-        output_layout.addWidget(self.create_model_folder_checkbox, 3, 0, 1, 2)
+        output_layout.addWidget(mp3_bitrate_label, 2, 0)
+        output_layout.addWidget(self.mp3_bitrate_combo, 2, 1)
+        output_layout.addWidget(self.add_model_name_checkbox, 3, 0, 1, 2)
+        output_layout.addWidget(self.create_model_folder_checkbox, 4, 0, 1, 2)
 
         layout.addLayout(selector_grid)
         layout.addWidget(self.model_label)
@@ -252,6 +299,165 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
         layout.addWidget(self.log_console)
+        layout.addWidget(self._build_advanced_group())
+        return group
+
+    def _build_advanced_group(self) -> QGroupBox:
+        group = QGroupBox("Advanced Model Controls")
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(12, 12, 12, 12)
+        group_layout.setSpacing(10)
+
+        self.advanced_toggle_button = QToolButton(group)
+        self.advanced_toggle_button.setText("Show Advanced Controls")
+        self.advanced_toggle_button.setCheckable(True)
+        self.advanced_toggle_button.setChecked(False)
+        self.advanced_toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.advanced_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_toggle_button.toggled.connect(self._toggle_advanced_controls)
+
+        self.advanced_container = QWidget(group)
+        self.advanced_container.setVisible(False)
+        advanced_layout = QVBoxLayout(self.advanced_container)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(12)
+
+        self.vr_advanced_group = QGroupBox("VR")
+        vr_layout = QGridLayout(self.vr_advanced_group)
+        vr_layout.setHorizontalSpacing(12)
+        vr_layout.setVerticalSpacing(8)
+        self.vr_aggression_combo = QComboBox(self.vr_advanced_group)
+        self.vr_aggression_combo.addItems([str(value) for value in VR_AGGRESSION])
+        self.vr_aggression_combo.currentTextChanged.connect(self._on_vr_aggression_changed)
+        self.vr_window_combo = QComboBox(self.vr_advanced_group)
+        self.vr_window_combo.addItems(list(VR_WINDOW))
+        self.vr_window_combo.currentTextChanged.connect(self._on_vr_window_changed)
+        self.vr_batch_size_combo = QComboBox(self.vr_advanced_group)
+        self.vr_batch_size_combo.addItems(list(BATCH_SIZE))
+        self.vr_batch_size_combo.currentTextChanged.connect(self._on_vr_batch_size_changed)
+        self.vr_crop_size_spinbox = QSpinBox(self.vr_advanced_group)
+        self.vr_crop_size_spinbox.setRange(1, 4096)
+        self.vr_crop_size_spinbox.valueChanged.connect(self._on_vr_crop_size_changed)
+        self.vr_tta_checkbox = QCheckBox("TTA", self.vr_advanced_group)
+        self.vr_tta_checkbox.toggled.connect(self._on_vr_tta_changed)
+        self.vr_post_process_checkbox = QCheckBox("Post Process", self.vr_advanced_group)
+        self.vr_post_process_checkbox.toggled.connect(self._on_vr_post_process_changed)
+        self.vr_high_end_checkbox = QCheckBox("High End Mirroring", self.vr_advanced_group)
+        self.vr_high_end_checkbox.toggled.connect(self._on_vr_high_end_changed)
+        self.vr_post_process_threshold_spinbox = QDoubleSpinBox(self.vr_advanced_group)
+        self.vr_post_process_threshold_spinbox.setRange(0.0, 1.0)
+        self.vr_post_process_threshold_spinbox.setSingleStep(0.05)
+        self.vr_post_process_threshold_spinbox.valueChanged.connect(self._on_vr_post_process_threshold_changed)
+        vr_layout.addWidget(QLabel("Aggression"), 0, 0)
+        vr_layout.addWidget(self.vr_aggression_combo, 0, 1)
+        vr_layout.addWidget(QLabel("Window Size"), 1, 0)
+        vr_layout.addWidget(self.vr_window_combo, 1, 1)
+        vr_layout.addWidget(QLabel("Batch Size"), 2, 0)
+        vr_layout.addWidget(self.vr_batch_size_combo, 2, 1)
+        vr_layout.addWidget(QLabel("Crop Size"), 3, 0)
+        vr_layout.addWidget(self.vr_crop_size_spinbox, 3, 1)
+        vr_layout.addWidget(self.vr_tta_checkbox, 4, 0)
+        vr_layout.addWidget(self.vr_post_process_checkbox, 4, 1)
+        vr_layout.addWidget(self.vr_high_end_checkbox, 5, 0)
+        vr_layout.addWidget(QLabel("Post Threshold"), 5, 1)
+        vr_layout.addWidget(self.vr_post_process_threshold_spinbox, 5, 2)
+
+        self.mdx_advanced_group = QGroupBox("MDX")
+        mdx_layout = QGridLayout(self.mdx_advanced_group)
+        mdx_layout.setHorizontalSpacing(12)
+        mdx_layout.setVerticalSpacing(8)
+        self.mdx_stems_combo = QComboBox(self.mdx_advanced_group)
+        self.mdx_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
+        self.mdx_stems_combo.currentTextChanged.connect(self._on_mdx_stems_changed)
+        self.mdx_segment_size_combo = QComboBox(self.mdx_advanced_group)
+        self.mdx_segment_size_combo.setEditable(True)
+        self.mdx_segment_size_combo.addItems([str(value) for value in MDX_SEGMENTS])
+        self.mdx_segment_size_combo.currentTextChanged.connect(self._on_mdx_segment_size_changed)
+        self.mdx_overlap_combo = QComboBox(self.mdx_advanced_group)
+        self.mdx_overlap_combo.addItems([str(value) for value in MDX_OVERLAP])
+        self.mdx_overlap_combo.currentTextChanged.connect(self._on_mdx_overlap_changed)
+        self.mdx_batch_size_combo = QComboBox(self.mdx_advanced_group)
+        self.mdx_batch_size_combo.addItems(list(BATCH_SIZE))
+        self.mdx_batch_size_combo.currentTextChanged.connect(self._on_mdx_batch_size_changed)
+        self.mdx_margin_spinbox = QSpinBox(self.mdx_advanced_group)
+        self.mdx_margin_spinbox.setRange(0, 999999)
+        self.mdx_margin_spinbox.valueChanged.connect(self._on_mdx_margin_changed)
+        self.mdx_compensate_field = QLineEdit(self.mdx_advanced_group)
+        self.mdx_compensate_field.editingFinished.connect(self._on_mdx_compensate_changed)
+        mdx_layout.addWidget(QLabel("Stem Target"), 0, 0)
+        mdx_layout.addWidget(self.mdx_stems_combo, 0, 1)
+        mdx_layout.addWidget(QLabel("Segment Size"), 1, 0)
+        mdx_layout.addWidget(self.mdx_segment_size_combo, 1, 1)
+        mdx_layout.addWidget(QLabel("Overlap"), 2, 0)
+        mdx_layout.addWidget(self.mdx_overlap_combo, 2, 1)
+        mdx_layout.addWidget(QLabel("Batch Size"), 3, 0)
+        mdx_layout.addWidget(self.mdx_batch_size_combo, 3, 1)
+        mdx_layout.addWidget(QLabel("Margin"), 4, 0)
+        mdx_layout.addWidget(self.mdx_margin_spinbox, 4, 1)
+        mdx_layout.addWidget(QLabel("Compensate"), 5, 0)
+        mdx_layout.addWidget(self.mdx_compensate_field, 5, 1)
+
+        self.demucs_advanced_group = QGroupBox("Demucs")
+        demucs_layout = QGridLayout(self.demucs_advanced_group)
+        demucs_layout.setHorizontalSpacing(12)
+        demucs_layout.setVerticalSpacing(8)
+        self.demucs_stems_combo = QComboBox(self.demucs_advanced_group)
+        self.demucs_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
+        self.demucs_stems_combo.currentTextChanged.connect(self._on_demucs_stems_changed)
+        self.demucs_segment_combo = QComboBox(self.demucs_advanced_group)
+        self.demucs_segment_combo.addItems([str(value) for value in DEMUCS_SEGMENTS])
+        self.demucs_segment_combo.currentTextChanged.connect(self._on_demucs_segment_changed)
+        self.demucs_overlap_combo = QComboBox(self.demucs_advanced_group)
+        self.demucs_overlap_combo.addItems([str(value) for value in DEMUCS_OVERLAP])
+        self.demucs_overlap_combo.currentTextChanged.connect(self._on_demucs_overlap_changed)
+        self.demucs_shifts_spinbox = QSpinBox(self.demucs_advanced_group)
+        self.demucs_shifts_spinbox.setRange(0, 100)
+        self.demucs_shifts_spinbox.valueChanged.connect(self._on_demucs_shifts_changed)
+        self.demucs_margin_spinbox = QSpinBox(self.demucs_advanced_group)
+        self.demucs_margin_spinbox.setRange(0, 999999)
+        self.demucs_margin_spinbox.valueChanged.connect(self._on_demucs_margin_changed)
+        demucs_layout.addWidget(QLabel("Stem Target"), 0, 0)
+        demucs_layout.addWidget(self.demucs_stems_combo, 0, 1)
+        demucs_layout.addWidget(QLabel("Segment"), 1, 0)
+        demucs_layout.addWidget(self.demucs_segment_combo, 1, 1)
+        demucs_layout.addWidget(QLabel("Overlap"), 2, 0)
+        demucs_layout.addWidget(self.demucs_overlap_combo, 2, 1)
+        demucs_layout.addWidget(QLabel("Shifts"), 3, 0)
+        demucs_layout.addWidget(self.demucs_shifts_spinbox, 3, 1)
+        demucs_layout.addWidget(QLabel("Margin"), 4, 0)
+        demucs_layout.addWidget(self.demucs_margin_spinbox, 4, 1)
+
+        self.composition_group = QGroupBox("Workflow Composition")
+        composition_layout = QGridLayout(self.composition_group)
+        composition_layout.setHorizontalSpacing(12)
+        composition_layout.setVerticalSpacing(8)
+        self.demucs_pre_proc_checkbox = QCheckBox("Enable Demucs Pre-Proc", self.composition_group)
+        self.demucs_pre_proc_checkbox.toggled.connect(self._on_demucs_pre_proc_enabled_changed)
+        self.demucs_pre_proc_model_combo = QComboBox(self.composition_group)
+        self.demucs_pre_proc_model_combo.currentTextChanged.connect(self._on_demucs_pre_proc_model_changed)
+        self.demucs_pre_proc_inst_mix_checkbox = QCheckBox("Save Instrumental Mixture", self.composition_group)
+        self.demucs_pre_proc_inst_mix_checkbox.toggled.connect(self._on_demucs_pre_proc_inst_mix_changed)
+        self.vocal_splitter_checkbox = QCheckBox("Enable Vocal Splitter", self.composition_group)
+        self.vocal_splitter_checkbox.toggled.connect(self._on_vocal_splitter_enabled_changed)
+        self.vocal_splitter_model_combo = QComboBox(self.composition_group)
+        self.vocal_splitter_model_combo.currentTextChanged.connect(self._on_vocal_splitter_model_changed)
+        self.vocal_splitter_save_inst_checkbox = QCheckBox("Save Split Instrumentals", self.composition_group)
+        self.vocal_splitter_save_inst_checkbox.toggled.connect(self._on_vocal_splitter_save_inst_changed)
+        composition_layout.addWidget(self.demucs_pre_proc_checkbox, 0, 0, 1, 2)
+        composition_layout.addWidget(QLabel("Pre-Proc Model"), 1, 0)
+        composition_layout.addWidget(self.demucs_pre_proc_model_combo, 1, 1)
+        composition_layout.addWidget(self.demucs_pre_proc_inst_mix_checkbox, 2, 0, 1, 2)
+        composition_layout.addWidget(self.vocal_splitter_checkbox, 3, 0, 1, 2)
+        composition_layout.addWidget(QLabel("Vocal Splitter Model"), 4, 0)
+        composition_layout.addWidget(self.vocal_splitter_model_combo, 4, 1)
+        composition_layout.addWidget(self.vocal_splitter_save_inst_checkbox, 5, 0, 1, 2)
+
+        advanced_layout.addWidget(self.vr_advanced_group)
+        advanced_layout.addWidget(self.mdx_advanced_group)
+        advanced_layout.addWidget(self.demucs_advanced_group)
+        advanced_layout.addWidget(self.composition_group)
+        group_layout.addWidget(self.advanced_toggle_button)
+        group_layout.addWidget(self.advanced_container)
         return group
 
     def _select_input_files(self) -> None:
@@ -305,6 +511,7 @@ class MainWindow(QMainWindow):
         self._refresh_processing_controls()
         self._refresh_output_controls()
         self._refresh_tuning_controls()
+        self._refresh_advanced_controls()
         resolved_model = self._get_processing_facade().resolve_model(self.state)
         if resolved_model is None:
             self.model_label.setText("Backend target: unavailable for the selected process method")
@@ -323,7 +530,9 @@ class MainWindow(QMainWindow):
                     f"Selected model: {self._selected_model_name() or 'None'}",
                     f"Save format: {self.state.output.save_format}",
                     f"Wav type: {self.state.output.wav_type}",
+                    f"MP3 bitrate: {self.state.output.mp3_bitrate}",
                     f"GPU preferred: {'Yes' if self.state.processing.use_gpu else 'No'}",
+                    f"Advanced controls: {'Expanded' if self.advanced_container.isVisible() else 'Collapsed'}",
                     f"Normalize output: {'Yes' if self.state.processing.normalize_output else 'No'}",
                     f"Input: {input_hint}",
                     f"Output: {output_hint}",
@@ -331,11 +540,17 @@ class MainWindow(QMainWindow):
             )
         )
         self.process_button.setEnabled(
-            self.processing_thread is None
+            not self.state.runtime.is_processing
             and resolved_model is not None
             and bool(input_paths)
             and bool(self.state.paths.export_path)
         )
+        self.process_button.setText("Process with GPU" if self.state.processing.use_gpu else "Process on CPU")
+        self.cancel_button.setEnabled(self.state.runtime.can_cancel)
+        if self.state.runtime.status_text:
+            self.status_label.setText(self.state.runtime.status_text)
+        self.progress_bar.setValue(int(max(0.0, min(self.state.runtime.progress, 100.0))))
+        self._sync_log_console()
 
     def _get_processing_facade(self) -> ProcessingFacade:
         if self.processing_facade is None:
@@ -391,6 +606,10 @@ class MainWindow(QMainWindow):
             self.wav_type_combo.setCurrentText(self.state.output.wav_type or "PCM_16")
             self.wav_type_combo.blockSignals(False)
 
+            self.mp3_bitrate_combo.blockSignals(True)
+            self.mp3_bitrate_combo.setCurrentText(self.state.output.mp3_bitrate or "320k")
+            self.mp3_bitrate_combo.blockSignals(False)
+
             self.add_model_name_checkbox.blockSignals(True)
             self.add_model_name_checkbox.setChecked(self.state.output.add_model_name)
             self.add_model_name_checkbox.blockSignals(False)
@@ -419,8 +638,148 @@ class MainWindow(QMainWindow):
             self.secondary_stem_only_checkbox.blockSignals(True)
             self.secondary_stem_only_checkbox.setChecked(self.state.processing.secondary_stem_only)
             self.secondary_stem_only_checkbox.blockSignals(False)
+
+            self.testing_audio_checkbox.blockSignals(True)
+            self.testing_audio_checkbox.setChecked(self.state.processing.testing_audio)
+            self.testing_audio_checkbox.blockSignals(False)
+
+            self.model_sample_mode_checkbox.blockSignals(True)
+            self.model_sample_mode_checkbox.setChecked(self.state.processing.model_sample_mode)
+            self.model_sample_mode_checkbox.blockSignals(False)
+
+            self.model_sample_duration_spinbox.blockSignals(True)
+            self.model_sample_duration_spinbox.setValue(self.state.processing.model_sample_duration)
+            self.model_sample_duration_spinbox.blockSignals(False)
         finally:
             self._is_syncing_processing_controls = False
+        is_mp3 = self.state.output.save_format == MP3
+        self.mp3_bitrate_combo.setEnabled(is_mp3)
+        self.wav_type_combo.setEnabled(not is_mp3)
+        self.model_sample_duration_spinbox.setEnabled(self.state.processing.model_sample_mode)
+
+    def _refresh_advanced_controls(self) -> None:
+        aux_models = self._available_aux_models()
+        self._is_syncing_processing_controls = True
+        try:
+            self.vr_aggression_combo.blockSignals(True)
+            self.vr_aggression_combo.setCurrentText(str(self.state.advanced.aggression_setting))
+            self.vr_aggression_combo.blockSignals(False)
+
+            self.vr_window_combo.blockSignals(True)
+            self.vr_window_combo.setCurrentText(str(self.state.advanced.window_size))
+            self.vr_window_combo.blockSignals(False)
+
+            self.vr_batch_size_combo.blockSignals(True)
+            self.vr_batch_size_combo.setCurrentText(self.state.advanced.batch_size or DEF_OPT)
+            self.vr_batch_size_combo.blockSignals(False)
+
+            self.vr_crop_size_spinbox.blockSignals(True)
+            self.vr_crop_size_spinbox.setValue(self.state.advanced.crop_size)
+            self.vr_crop_size_spinbox.blockSignals(False)
+
+            self.vr_tta_checkbox.blockSignals(True)
+            self.vr_tta_checkbox.setChecked(self.state.advanced.is_tta)
+            self.vr_tta_checkbox.blockSignals(False)
+
+            self.vr_post_process_checkbox.blockSignals(True)
+            self.vr_post_process_checkbox.setChecked(self.state.advanced.is_post_process)
+            self.vr_post_process_checkbox.blockSignals(False)
+
+            self.vr_high_end_checkbox.blockSignals(True)
+            self.vr_high_end_checkbox.setChecked(self.state.advanced.is_high_end_process)
+            self.vr_high_end_checkbox.blockSignals(False)
+
+            self.vr_post_process_threshold_spinbox.blockSignals(True)
+            self.vr_post_process_threshold_spinbox.setValue(self.state.advanced.post_process_threshold)
+            self.vr_post_process_threshold_spinbox.blockSignals(False)
+
+            self.mdx_stems_combo.blockSignals(True)
+            self.mdx_stems_combo.setCurrentText(self.state.models.mdx_stems or ALL_STEMS)
+            self.mdx_stems_combo.blockSignals(False)
+
+            self.mdx_segment_size_combo.blockSignals(True)
+            self.mdx_segment_size_combo.setCurrentText(str(self.state.advanced.mdx_segment_size))
+            self.mdx_segment_size_combo.blockSignals(False)
+
+            self.mdx_overlap_combo.blockSignals(True)
+            self.mdx_overlap_combo.setCurrentText(str(self.state.advanced.overlap_mdx))
+            self.mdx_overlap_combo.blockSignals(False)
+
+            self.mdx_batch_size_combo.blockSignals(True)
+            self.mdx_batch_size_combo.setCurrentText(self.state.advanced.mdx_batch_size or DEF_OPT)
+            self.mdx_batch_size_combo.blockSignals(False)
+
+            self.mdx_margin_spinbox.blockSignals(True)
+            self.mdx_margin_spinbox.setValue(self.state.advanced.margin)
+            self.mdx_margin_spinbox.blockSignals(False)
+
+            self.mdx_compensate_field.blockSignals(True)
+            self.mdx_compensate_field.setText(self.state.advanced.compensate or AUTO_SELECT)
+            self.mdx_compensate_field.blockSignals(False)
+
+            self.demucs_stems_combo.blockSignals(True)
+            self.demucs_stems_combo.setCurrentText(self.state.models.demucs_stems or ALL_STEMS)
+            self.demucs_stems_combo.blockSignals(False)
+
+            self.demucs_segment_combo.blockSignals(True)
+            self.demucs_segment_combo.setCurrentText(str(self.state.advanced.segment))
+            self.demucs_segment_combo.blockSignals(False)
+
+            self.demucs_overlap_combo.blockSignals(True)
+            self.demucs_overlap_combo.setCurrentText(str(self.state.advanced.overlap))
+            self.demucs_overlap_combo.blockSignals(False)
+
+            self.demucs_shifts_spinbox.blockSignals(True)
+            self.demucs_shifts_spinbox.setValue(self.state.advanced.shifts)
+            self.demucs_shifts_spinbox.blockSignals(False)
+
+            self.demucs_margin_spinbox.blockSignals(True)
+            self.demucs_margin_spinbox.setValue(self.state.advanced.margin_demucs)
+            self.demucs_margin_spinbox.blockSignals(False)
+
+            self.demucs_pre_proc_checkbox.blockSignals(True)
+            self.demucs_pre_proc_checkbox.setChecked(self._extra_flag("is_demucs_pre_proc_model_activate"))
+            self.demucs_pre_proc_checkbox.blockSignals(False)
+
+            self.demucs_pre_proc_model_combo.blockSignals(True)
+            self.demucs_pre_proc_model_combo.clear()
+            self.demucs_pre_proc_model_combo.addItems(list(aux_models))
+            self.demucs_pre_proc_model_combo.setCurrentText(
+                self.state.models.demucs_pre_proc_model if self.state.models.demucs_pre_proc_model in aux_models else NO_MODEL
+            )
+            self.demucs_pre_proc_model_combo.blockSignals(False)
+
+            self.demucs_pre_proc_inst_mix_checkbox.blockSignals(True)
+            self.demucs_pre_proc_inst_mix_checkbox.setChecked(self._extra_flag("is_demucs_pre_proc_model_inst_mix"))
+            self.demucs_pre_proc_inst_mix_checkbox.blockSignals(False)
+
+            self.vocal_splitter_checkbox.blockSignals(True)
+            self.vocal_splitter_checkbox.setChecked(self._extra_flag("is_set_vocal_splitter"))
+            self.vocal_splitter_checkbox.blockSignals(False)
+
+            self.vocal_splitter_model_combo.blockSignals(True)
+            self.vocal_splitter_model_combo.clear()
+            self.vocal_splitter_model_combo.addItems(list(aux_models))
+            self.vocal_splitter_model_combo.setCurrentText(
+                self.state.models.vocal_splitter_model if self.state.models.vocal_splitter_model in aux_models else NO_MODEL
+            )
+            self.vocal_splitter_model_combo.blockSignals(False)
+
+            self.vocal_splitter_save_inst_checkbox.blockSignals(True)
+            self.vocal_splitter_save_inst_checkbox.setChecked(self._extra_flag("is_save_inst_set_vocal_splitter"))
+            self.vocal_splitter_save_inst_checkbox.blockSignals(False)
+        finally:
+            self._is_syncing_processing_controls = False
+
+        process_method = self.state.processing.process_method
+        self.vr_advanced_group.setVisible(process_method == "VR Architecture")
+        self.mdx_advanced_group.setVisible(process_method == "MDX-Net")
+        self.demucs_advanced_group.setVisible(process_method == "Demucs")
+        self.composition_group.setVisible(process_method in {"VR Architecture", "MDX-Net", "Demucs"})
+        self.demucs_pre_proc_model_combo.setEnabled(self.demucs_pre_proc_checkbox.isChecked())
+        self.demucs_pre_proc_inst_mix_checkbox.setEnabled(self.demucs_pre_proc_checkbox.isChecked())
+        self.vocal_splitter_model_combo.setEnabled(self.vocal_splitter_checkbox.isChecked())
+        self.vocal_splitter_save_inst_checkbox.setEnabled(self.vocal_splitter_checkbox.isChecked())
 
     def _on_process_method_changed(self, process_method: str) -> None:
         if self._is_syncing_processing_controls or not process_method:
@@ -462,6 +821,13 @@ class MainWindow(QMainWindow):
         if self._is_syncing_processing_controls or not wav_type:
             return
         self.state = replace(self.state, output=replace(self.state.output, wav_type=wav_type))
+        self._persist_state()
+        self._refresh_view()
+
+    def _on_mp3_bitrate_changed(self, bitrate: str) -> None:
+        if self._is_syncing_processing_controls or not bitrate:
+            return
+        self.state = replace(self.state, output=replace(self.state.output, mp3_bitrate=bitrate))
         self._persist_state()
         self._refresh_view()
 
@@ -521,6 +887,185 @@ class MainWindow(QMainWindow):
         self._persist_state()
         self._refresh_view()
 
+    def _on_testing_audio_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self.state = replace(self.state, processing=replace(self.state.processing, testing_audio=checked))
+        self._persist_state()
+        self._refresh_view()
+
+    def _on_model_sample_mode_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self.state = replace(self.state, processing=replace(self.state.processing, model_sample_mode=checked))
+        self._persist_state()
+        self._refresh_view()
+
+    def _on_model_sample_duration_changed(self, value: int) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self.state = replace(self.state, processing=replace(self.state.processing, model_sample_duration=value))
+        self._persist_state()
+        self._refresh_view()
+
+    def _toggle_advanced_controls(self, checked: bool) -> None:
+        self.advanced_toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+        )
+        self.advanced_toggle_button.setText("Hide Advanced Controls" if checked else "Show Advanced Controls")
+        self.advanced_container.setVisible(checked)
+        self._refresh_view()
+
+    def _update_advanced(self, **changes: object) -> None:
+        self.state = replace(self.state, advanced=replace(self.state.advanced, **changes))
+        self._persist_state()
+        self._refresh_view()
+
+    def _update_models(self, **changes: object) -> None:
+        self.state = replace(self.state, models=replace(self.state.models, **changes))
+        self._persist_state()
+        self._refresh_view()
+
+    def _update_extra_settings(self, **changes: object) -> None:
+        updated = dict(self.state.extra_settings)
+        updated.update(changes)
+        self.state = replace(self.state, extra_settings=updated)
+        self._persist_state()
+        self._refresh_view()
+
+    def _extra_flag(self, key: str) -> bool:
+        return bool(self.state.extra_settings.get(key, False))
+
+    def _available_aux_models(self) -> tuple[str, ...]:
+        models = self._get_processing_facade().available_tagged_models_for_methods(("VR Architecture", "MDX-Net"))
+        return (NO_MODEL, *models)
+
+    def _on_vr_aggression_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(aggression_setting=int(value))
+
+    def _on_vr_window_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(window_size=int(value))
+
+    def _on_vr_batch_size_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(batch_size=value)
+
+    def _on_vr_crop_size_changed(self, value: int) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(crop_size=value)
+
+    def _on_vr_tta_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(is_tta=checked)
+
+    def _on_vr_post_process_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(is_post_process=checked)
+
+    def _on_vr_high_end_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(is_high_end_process=checked)
+
+    def _on_vr_post_process_threshold_changed(self, value: float) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(post_process_threshold=value)
+
+    def _on_mdx_segment_size_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(mdx_segment_size=int(value))
+
+    def _on_mdx_stems_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_models(mdx_stems=value)
+
+    def _on_mdx_overlap_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(overlap_mdx=value)
+
+    def _on_mdx_batch_size_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(mdx_batch_size=value)
+
+    def _on_mdx_margin_changed(self, value: int) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(margin=value)
+
+    def _on_mdx_compensate_changed(self) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        value = self.mdx_compensate_field.text().strip() or AUTO_SELECT
+        self._update_advanced(compensate=value)
+
+    def _on_demucs_segment_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(segment=value)
+
+    def _on_demucs_stems_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_models(demucs_stems=value)
+
+    def _on_demucs_overlap_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_advanced(overlap=value)
+
+    def _on_demucs_shifts_changed(self, value: int) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(shifts=value)
+
+    def _on_demucs_margin_changed(self, value: int) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_advanced(margin_demucs=value)
+
+    def _on_demucs_pre_proc_enabled_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_extra_settings(is_demucs_pre_proc_model_activate=checked)
+
+    def _on_demucs_pre_proc_model_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_models(demucs_pre_proc_model=value)
+
+    def _on_demucs_pre_proc_inst_mix_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_extra_settings(is_demucs_pre_proc_model_inst_mix=checked)
+
+    def _on_vocal_splitter_enabled_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_extra_settings(is_set_vocal_splitter=checked)
+
+    def _on_vocal_splitter_model_changed(self, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        self._update_models(vocal_splitter_model=value)
+
+    def _on_vocal_splitter_save_inst_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        self._update_extra_settings(is_save_inst_set_vocal_splitter=checked)
+
     def _selected_model_name(self) -> str:
         return self._selected_model_name_for_method(self.state.processing.process_method)
 
@@ -546,10 +1091,14 @@ class MainWindow(QMainWindow):
         if self.processing_thread is not None:
             return
 
-        self.log_console.clear()
-        self.progress_bar.setValue(0)
-        self.status_label.setText("Preparing")
-        self.process_button.setEnabled(False)
+        self._set_runtime(
+            is_processing=True,
+            can_cancel=True,
+            progress=0.0,
+            status_text="Preparing",
+            log_lines=(),
+            last_error=None,
+        )
 
         self.processing_thread = QThread(self)
         self.processing_worker = _ProcessingWorker(self._get_processing_facade(), self.state)
@@ -558,28 +1107,66 @@ class MainWindow(QMainWindow):
         self.processing_thread.started.connect(self.processing_worker.run)
         self.processing_worker.log_emitted.connect(self._append_log)
         self.processing_worker.progress_emitted.connect(self.progress_bar.setValue)
-        self.processing_worker.status_emitted.connect(self.status_label.setText)
+        self.processing_worker.progress_emitted.connect(self._set_runtime_progress)
+        self.processing_worker.status_emitted.connect(self._set_runtime_status)
+        self.processing_worker.cancelled.connect(self._processing_cancelled)
         self.processing_worker.failed.connect(self._processing_failed)
         self.processing_worker.finished.connect(self._processing_finished)
         self.processing_worker.finished.connect(self.processing_thread.quit)
+        self.processing_worker.cancelled.connect(self.processing_thread.quit)
         self.processing_worker.failed.connect(self.processing_thread.quit)
         self.processing_thread.finished.connect(self._cleanup_processing_thread)
         self.processing_thread.start()
 
     def _append_log(self, message: str) -> None:
-        self.log_console.appendPlainText(message)
+        self._set_runtime(log_lines=self.state.runtime.log_lines + (message,))
+
+    def _sync_log_console(self) -> None:
+        desired = "\n".join(self.state.runtime.log_lines)
+        if self.log_console.toPlainText() != desired:
+            self.log_console.setPlainText(desired)
+
+    def _set_runtime(self, **changes: object) -> None:
+        self.state = replace(self.state, runtime=replace(self.state.runtime, **changes))
+        self._refresh_view()
+
+    def _set_runtime_progress(self, value: int) -> None:
+        self._set_runtime(progress=float(value))
+
+    def _set_runtime_status(self, value: str) -> None:
+        self._set_runtime(status_text=value)
+
+    def _cancel_processing(self) -> None:
+        if self.processing_worker is None:
+            return
+        self._set_runtime(status_text="Cancelling", can_cancel=False)
+        self.processing_worker.cancel()
 
     def _processing_finished(self, result: ProcessResult) -> None:
-        self.progress_bar.setValue(100)
-        self.status_label.setText(f"Completed: {len(result.processed_files)} file(s)")
         self._append_log(f'Output folder: "{result.output_path}"')
         self._append_log(f"Model used: {result.model.process_method} / {result.model.model_name}")
-        self.process_button.setEnabled(True)
+        self._set_runtime(
+            is_processing=False,
+            can_cancel=False,
+            progress=100.0,
+            status_text=f"Completed: {len(result.processed_files)} file(s)",
+        )
+
+    def _processing_cancelled(self) -> None:
+        self._set_runtime(
+            is_processing=False,
+            can_cancel=False,
+            status_text="Cancelled",
+        )
 
     def _processing_failed(self, message: str) -> None:
-        self.status_label.setText("Failed")
         self._append_log(message)
-        self.process_button.setEnabled(True)
+        self._set_runtime(
+            is_processing=False,
+            can_cancel=False,
+            status_text="Failed",
+            last_error=message,
+        )
 
     def _cleanup_processing_thread(self) -> None:
         if self.processing_worker is not None:
@@ -592,6 +1179,7 @@ class MainWindow(QMainWindow):
 
 class _ProcessingWorker(QObject):
     finished = Signal(object)
+    cancelled = Signal()
     failed = Signal(str)
     log_emitted = Signal(str)
     progress_emitted = Signal(int)
@@ -602,6 +1190,9 @@ class _ProcessingWorker(QObject):
         self.facade = facade
         self.state = state
 
+    def cancel(self) -> None:
+        self.facade.cancel()
+
     def run(self) -> None:
         try:
             result = self.facade.process(
@@ -610,6 +1201,9 @@ class _ProcessingWorker(QObject):
                 progress=lambda value: self.progress_emitted.emit(int(max(0, min(value, 100)))),
                 status=self.status_emitted.emit,
             )
+        except JobCancelledError:
+            self.cancelled.emit()
+            return
         except Exception as exc:
             error_message = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             self.failed.emit(error_message)

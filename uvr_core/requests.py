@@ -47,12 +47,34 @@ class ProcessingOptionsRequest:
 
 
 @dataclass(frozen=True)
+class AdvancedModelControlsRequest:
+    aggression_setting: int
+    window_size: int
+    batch_size: str
+    crop_size: int
+    is_tta: bool
+    is_post_process: bool
+    is_high_end_process: bool
+    post_process_threshold: float
+    margin: int
+    mdx_segment_size: int
+    overlap: str
+    overlap_mdx: str
+    shifts: int
+    margin_demucs: int
+    compensate: str
+    mdx_batch_size: str
+    segment: str
+
+
+@dataclass(frozen=True)
 class SeparationRequest:
     input_paths: tuple[str, ...]
     export_path: str
     models: ModelSelectionRequest
     output: OutputSettingsRequest
     options: ProcessingOptionsRequest
+    advanced: AdvancedModelControlsRequest
     extra_settings: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -135,6 +157,25 @@ class SeparationRequest:
                 testing_audio=bool(values.get("is_testing_audio", False)),
                 model_sample_mode=bool(values.get("model_sample_mode", False)),
                 model_sample_duration=int(values.get("model_sample_mode_duration", 30)),
+            ),
+            advanced=AdvancedModelControlsRequest(
+                aggression_setting=int(values.get("aggression_setting", 5)),
+                window_size=int(values.get("window_size", 512)),
+                batch_size=str(values.get("batch_size", DEFAULT_DATA.get("batch_size", "Default"))),
+                crop_size=int(values.get("crop_size", 256)),
+                is_tta=bool(values.get("is_tta", False)),
+                is_post_process=bool(values.get("is_post_process", False)),
+                is_high_end_process=bool(values.get("is_high_end_process", False)),
+                post_process_threshold=float(values.get("post_process_threshold", 0.2)),
+                margin=int(values.get("margin", 44100)),
+                mdx_segment_size=int(values.get("mdx_segment_size", 256)),
+                overlap=str(values.get("overlap", DEFAULT_DATA.get("overlap", "0.25"))),
+                overlap_mdx=str(values.get("overlap_mdx", DEFAULT_DATA.get("overlap_mdx", "Default"))),
+                shifts=int(values.get("shifts", 2)),
+                margin_demucs=int(values.get("margin_demucs", 44100)),
+                compensate=str(values.get("compensate", DEFAULT_DATA.get("compensate", "Auto"))),
+                mdx_batch_size=str(values.get("mdx_batch_size", DEFAULT_DATA.get("mdx_batch_size", "Default"))),
+                segment=str(values.get("segment", DEFAULT_DATA.get("segment", "Default"))),
             ),
             extra_settings={key: value for key, value in values.items() if key not in mapped_keys},
         )

@@ -49,7 +49,10 @@ Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_
 - `uvr/runtime.py` owns backend runtime/bootstrap and path configuration, with env-var overrides for model/base paths.
 - `uvr_cli/` imports from `uvr_core`/`uvr` rather than `uvr_qt`, supports `separate`, `ensemble`, `audio-tool`, `download`, `refresh-catalog`, and `config`, and supports machine-readable JSON output for listings and progress events.
 - The CLI is runnable standalone via `python -m uvr_cli` and does not require `PySide6` or any Phase 4 Qt module.
-- `uvr_qt/services/processing_facade.py` remains a thin Qt adapter over `uvr_core`, but Phase 4 UI work has not started here.
+- `uvr_qt/` now has a runnable PySide6 shell via `python -m uvr_qt.app`, typed app state, a main window, and a thin processing facade over `uvr_core`.
+- The Qt main workflow now supports input/output selection, process-method/model selection, start/cancel, progress/log display, persistence through `uvr/config`, and a collapsible advanced-controls panel for VR/MDX/Demucs settings.
+- The Qt window also now exposes MDX/Demucs stem targeting plus first-pass workflow-composition controls for Demucs pre-proc and vocal-splitter selection using shared `uvr_core` resolver hooks.
+- Full Tk parity is not reached: per-stem secondary-model assignment/scales, download manager UI, audio-tool UI, ensemble helpers, and the remaining popup-driven workflows still live outside the Qt frontend.
 - `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
 - Downloads, cache, model catalog, ensemble, and audio tools are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state for the legacy app shell.
 
@@ -121,6 +124,19 @@ Matches the existing `pyside6-from-scratch-plan.md` Phase C/D scope, now built o
 - Cancellation routed through the job event stream, not widget state.
 
 The advantage of doing this after Phases 1–3: the Qt frontend only consumes the same `uvr_core` that the CLI already exercises, so regressions show up earlier and cheaper.
+
+Current progress:
+
+- `uvr_qt/state/app_state.py` now holds typed path/model/output/processing/runtime state plus typed advanced model controls.
+- `uvr_qt/ui/main_window.py` now supports the primary separation shell: input/output selection, model reloading, output/tuning controls, processing progress/logs, and cancellation.
+- `uvr_core.jobs.SeparationJob` now supports cancellation and auxiliary-model resolution for the Qt adapter.
+- The Qt advanced panel now covers VR/MDX/Demucs numeric controls, MDX/Demucs stem selection, and first-pass workflow composition for Demucs pre-proc and vocal-splitter selection.
+
+Still missing before Phase 4 can be called done:
+
+- typed per-stem secondary-model selection and scaling
+- broader validation around incompatible model-composition combinations
+- enough non-default workflow coverage to stop relying on Tk menus for common separation setups
 
 **Exit:** Qt app replaces Tk for the primary separation workflow without reading from `UVR.py`.
 

@@ -10,6 +10,7 @@ from gui_data.constants import DEFAULT_DATA
 from uvr.config.models import AppSettings
 from uvr.config.persistence import load_settings
 from uvr_core.requests import (
+    AdvancedModelControlsRequest,
     ModelSelectionRequest,
     OutputSettingsRequest,
     ProcessingOptionsRequest,
@@ -87,6 +88,29 @@ class ProcessingRuntimeState:
 
 
 @dataclass(frozen=True)
+class AdvancedModelControlsState:
+    """Typed advanced backend settings for VR, MDX, and Demucs models."""
+
+    aggression_setting: int
+    window_size: int
+    batch_size: str
+    crop_size: int
+    is_tta: bool
+    is_post_process: bool
+    is_high_end_process: bool
+    post_process_threshold: float
+    margin: int
+    mdx_segment_size: int
+    overlap: str
+    overlap_mdx: str
+    shifts: int
+    margin_demucs: int
+    compensate: str
+    mdx_batch_size: str
+    segment: str
+
+
+@dataclass(frozen=True)
 class AppState:
     """Single source of truth for the Qt application."""
 
@@ -94,6 +118,7 @@ class AppState:
     models: ModelSelectionState
     output: OutputSettingsState
     processing: ProcessingSettingsState
+    advanced: AdvancedModelControlsState
     runtime: ProcessingRuntimeState = field(default_factory=ProcessingRuntimeState)
     extra_settings: dict[str, Any] = field(default_factory=dict)
 
@@ -162,6 +187,26 @@ class AppState:
             model_sample_duration=int(values.get("model_sample_mode_duration", 30)),
         )
 
+        advanced = AdvancedModelControlsState(
+            aggression_setting=int(values.get("aggression_setting", 5)),
+            window_size=int(values.get("window_size", 512)),
+            batch_size=str(values.get("batch_size", DEFAULT_DATA.get("batch_size", "Default"))),
+            crop_size=int(values.get("crop_size", 256)),
+            is_tta=bool(values.get("is_tta", False)),
+            is_post_process=bool(values.get("is_post_process", False)),
+            is_high_end_process=bool(values.get("is_high_end_process", False)),
+            post_process_threshold=float(values.get("post_process_threshold", 0.2)),
+            margin=int(values.get("margin", 44100)),
+            mdx_segment_size=int(values.get("mdx_segment_size", 256)),
+            overlap=str(values.get("overlap", DEFAULT_DATA.get("overlap", "0.25"))),
+            overlap_mdx=str(values.get("overlap_mdx", DEFAULT_DATA.get("overlap_mdx", "Default"))),
+            shifts=int(values.get("shifts", 2)),
+            margin_demucs=int(values.get("margin_demucs", 44100)),
+            compensate=str(values.get("compensate", DEFAULT_DATA.get("compensate", "Auto"))),
+            mdx_batch_size=str(values.get("mdx_batch_size", DEFAULT_DATA.get("mdx_batch_size", "Default"))),
+            segment=str(values.get("segment", DEFAULT_DATA.get("segment", "Default"))),
+        )
+
         mapped_keys = {
             "input_paths",
             "export_path",
@@ -207,6 +252,23 @@ class AppState:
             "is_testing_audio",
             "model_sample_mode",
             "model_sample_mode_duration",
+            "aggression_setting",
+            "window_size",
+            "batch_size",
+            "crop_size",
+            "is_tta",
+            "is_post_process",
+            "is_high_end_process",
+            "post_process_threshold",
+            "margin",
+            "mdx_segment_size",
+            "overlap",
+            "overlap_mdx",
+            "shifts",
+            "margin_demucs",
+            "compensate",
+            "mdx_batch_size",
+            "segment",
         }
 
         return cls(
@@ -214,6 +276,7 @@ class AppState:
             models=models,
             output=output,
             processing=processing,
+            advanced=advanced,
             extra_settings={key: value for key, value in values.items() if key not in mapped_keys},
         )
 
@@ -255,6 +318,23 @@ class AppState:
                 "is_testing_audio": self.processing.testing_audio,
                 "model_sample_mode": self.processing.model_sample_mode,
                 "model_sample_mode_duration": self.processing.model_sample_duration,
+                "aggression_setting": self.advanced.aggression_setting,
+                "window_size": self.advanced.window_size,
+                "batch_size": self.advanced.batch_size,
+                "crop_size": self.advanced.crop_size,
+                "is_tta": self.advanced.is_tta,
+                "is_post_process": self.advanced.is_post_process,
+                "is_high_end_process": self.advanced.is_high_end_process,
+                "post_process_threshold": self.advanced.post_process_threshold,
+                "margin": self.advanced.margin,
+                "mdx_segment_size": self.advanced.mdx_segment_size,
+                "overlap": self.advanced.overlap,
+                "overlap_mdx": self.advanced.overlap_mdx,
+                "shifts": self.advanced.shifts,
+                "margin_demucs": self.advanced.margin_demucs,
+                "compensate": self.advanced.compensate,
+                "mdx_batch_size": self.advanced.mdx_batch_size,
+                "segment": self.advanced.segment,
             }
         )
         payload.update(self.models.secondary_models)
@@ -295,6 +375,25 @@ class AppState:
                 testing_audio=self.processing.testing_audio,
                 model_sample_mode=self.processing.model_sample_mode,
                 model_sample_duration=self.processing.model_sample_duration,
+            ),
+            advanced=AdvancedModelControlsRequest(
+                aggression_setting=self.advanced.aggression_setting,
+                window_size=self.advanced.window_size,
+                batch_size=self.advanced.batch_size,
+                crop_size=self.advanced.crop_size,
+                is_tta=self.advanced.is_tta,
+                is_post_process=self.advanced.is_post_process,
+                is_high_end_process=self.advanced.is_high_end_process,
+                post_process_threshold=self.advanced.post_process_threshold,
+                margin=self.advanced.margin,
+                mdx_segment_size=self.advanced.mdx_segment_size,
+                overlap=self.advanced.overlap,
+                overlap_mdx=self.advanced.overlap_mdx,
+                shifts=self.advanced.shifts,
+                margin_demucs=self.advanced.margin_demucs,
+                compensate=self.advanced.compensate,
+                mdx_batch_size=self.advanced.mdx_batch_size,
+                segment=self.advanced.segment,
             ),
             extra_settings=dict(self.extra_settings),
         )

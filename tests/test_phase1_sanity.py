@@ -25,10 +25,11 @@ from uvr.services.downloads import (
     validate_vip_code,
 )
 from uvr_core.events import AudioToolResultEvent, DownloadResultEvent, EnsembleResultEvent, LogEvent, ProgressEvent, ResultEvent, StatusEvent
-from uvr_core.jobs import AudioToolJob, DownloadJob, EnsembleJob, ResolvedModel, SeparationJob
+from uvr_core.jobs import AudioToolJob, DownloadJob, EnsembleJob, JobCancelledError, ResolvedModel, SeparationJob
 from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
 from uvr_cli.__main__ import cli
 from uvr_qt.state.app_state import (
+    AdvancedModelControlsState,
     AppState,
     ModelSelectionState,
     OutputSettingsState,
@@ -969,6 +970,25 @@ class AppStateConversionTests(unittest.TestCase):
                 model_sample_mode=False,
                 model_sample_duration=30,
             ),
+            advanced=AdvancedModelControlsState(
+                aggression_setting=7,
+                window_size=1024,
+                batch_size="3",
+                crop_size=512,
+                is_tta=True,
+                is_post_process=True,
+                is_high_end_process=True,
+                post_process_threshold=0.35,
+                margin=22050,
+                mdx_segment_size=512,
+                overlap="0.5",
+                overlap_mdx="0.75",
+                shifts=3,
+                margin_demucs=11025,
+                compensate="1.08",
+                mdx_batch_size="4",
+                segment="10",
+            ),
             extra_settings={"custom": "value"},
         )
 
@@ -979,7 +999,76 @@ class AppStateConversionTests(unittest.TestCase):
         self.assertEqual(request.models.vr_model, "vr model")
         self.assertEqual(request.output.save_format, "WAV")
         self.assertTrue(request.options.use_gpu)
+        self.assertEqual(request.advanced.window_size, 1024)
+        self.assertEqual(request.advanced.compensate, "1.08")
         self.assertEqual(request.extra_settings["custom"], "value")
+
+    def test_app_state_round_trips_output_and_sampling_fields(self) -> None:
+        state = AppState(
+            paths=PathsState(),
+            models=ModelSelectionState(
+                vr_model="",
+                mdx_net_model="",
+                demucs_model="",
+                demucs_pre_proc_model="",
+                vocal_splitter_model="",
+                demucs_stems="All Stems",
+                mdx_stems="All Stems",
+            ),
+            output=OutputSettingsState(
+                save_format="MP3",
+                wav_type="PCM_16",
+                mp3_bitrate="224k",
+                add_model_name=False,
+                create_model_folder=True,
+            ),
+            processing=ProcessingSettingsState(
+                process_method="VR Architecture",
+                audio_tool="",
+                algorithm="",
+                device="DEFAULT",
+                use_gpu=False,
+                primary_stem_only=False,
+                secondary_stem_only=False,
+                normalize_output=False,
+                wav_ensemble=False,
+                testing_audio=True,
+                model_sample_mode=True,
+                model_sample_duration=45,
+            ),
+            advanced=AdvancedModelControlsState(
+                aggression_setting=12,
+                window_size=320,
+                batch_size="2",
+                crop_size=384,
+                is_tta=False,
+                is_post_process=True,
+                is_high_end_process=False,
+                post_process_threshold=0.4,
+                margin=12345,
+                mdx_segment_size=768,
+                overlap="0.25",
+                overlap_mdx="0.5",
+                shifts=6,
+                margin_demucs=54321,
+                compensate="1.035",
+                mdx_batch_size="5",
+                segment="15",
+            ),
+        )
+
+        payload = state.to_legacy_dict()
+
+        self.assertEqual(payload["save_format"], "MP3")
+        self.assertEqual(payload["mp3_bit_set"], "224k")
+        self.assertTrue(payload["is_create_model_folder"])
+        self.assertTrue(payload["is_testing_audio"])
+        self.assertTrue(payload["model_sample_mode"])
+        self.assertEqual(payload["model_sample_mode_duration"], 45)
+        self.assertEqual(payload["window_size"], 320)
+        self.assertEqual(payload["mdx_segment_size"], 768)
+        self.assertEqual(payload["margin_demucs"], 54321)
+        self.assertEqual(payload["compensate"], "1.035")
 
     def test_separation_request_from_settings_preserves_extra_values(self) -> None:
         data = dict(DEFAULT_DATA)
@@ -998,6 +1087,7 @@ class AppStateConversionTests(unittest.TestCase):
         self.assertEqual(request.input_paths, ("track.wav",))
         self.assertEqual(request.export_path, "exports")
         self.assertEqual(request.models.vr_model, "vr model")
+        self.assertEqual(request.advanced.window_size, 512)
         self.assertEqual(request.extra_settings["custom_flag"], "present")
 
 
@@ -1062,6 +1152,25 @@ class SeparationJobTests(unittest.TestCase):
                     model_sample_mode=False,
                     model_sample_duration=30,
                 ),
+                advanced=SimpleNamespace(
+                    aggression_setting=5,
+                    window_size=512,
+                    batch_size="Default",
+                    crop_size=256,
+                    is_tta=False,
+                    is_post_process=False,
+                    is_high_end_process=False,
+                    post_process_threshold=0.2,
+                    margin=44100,
+                    mdx_segment_size=256,
+                    overlap="0.25",
+                    overlap_mdx="Default",
+                    shifts=2,
+                    margin_demucs=44100,
+                    compensate="Automatic",
+                    mdx_batch_size="Default",
+                    segment="Default",
+                ),
                 extra_settings={},
             )
 
@@ -1094,6 +1203,335 @@ class SeparationJobTests(unittest.TestCase):
         self.assertTrue(any(isinstance(event, LogEvent) and event.message == "inner log" for event in events))
         self.assertTrue(any(isinstance(event, ProgressEvent) and event.percent == 50.0 for event in events))
         self.assertIsInstance(events[-1], ResultEvent)
+
+    def test_run_can_be_cancelled(self) -> None:
+        job = SeparationJob()
+        events = []
+
+        class FakeSeparator:
+            def __init__(self, process_data: dict[str, object]):
+                self.process_data = process_data
+
+            def seperate(self) -> None:
+                self.process_data["set_progress_bar"](0.1)
+                self.process_data["set_progress_bar"](0.2)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.wav"
+            output_path = tmp_path / "out"
+            input_path.write_bytes(b"fake")
+
+            request = SeparationRequest(
+                input_paths=(str(input_path),),
+                export_path=str(output_path),
+                models=SimpleNamespace(
+                    vr_model="Fake Model",
+                    mdx_net_model="",
+                    demucs_model="",
+                    demucs_pre_proc_model="",
+                    vocal_splitter_model="",
+                    demucs_stems="All Stems",
+                    mdx_stems="All Stems",
+                    secondary_models={},
+                ),
+                output=SimpleNamespace(
+                    save_format="WAV",
+                    wav_type="PCM_16",
+                    mp3_bitrate="320k",
+                    add_model_name=False,
+                    create_model_folder=False,
+                ),
+                options=SimpleNamespace(
+                    process_method="VR Architecture",
+                    audio_tool="",
+                    algorithm="",
+                    device="DEFAULT",
+                    use_gpu=False,
+                    primary_stem_only=False,
+                    secondary_stem_only=False,
+                    normalize_output=False,
+                    wav_ensemble=False,
+                    testing_audio=False,
+                    model_sample_mode=False,
+                    model_sample_duration=30,
+                ),
+                advanced=SimpleNamespace(
+                    aggression_setting=5,
+                    window_size=512,
+                    batch_size="Default",
+                    crop_size=256,
+                    is_tta=False,
+                    is_post_process=False,
+                    is_high_end_process=False,
+                    post_process_threshold=0.2,
+                    margin=44100,
+                    mdx_segment_size=256,
+                    overlap="0.25",
+                    overlap_mdx="Default",
+                    shifts=2,
+                    margin_demucs=44100,
+                    compensate="Automatic",
+                    mdx_batch_size="Default",
+                    segment="Default",
+                ),
+                extra_settings={},
+            )
+
+            fake_model = SimpleNamespace(
+                model_status=True,
+                model_basename="fake_model",
+                process_method="VR Architecture",
+                is_mdx_c=False,
+            )
+
+            def subscriber(event):
+                events.append(event)
+                if isinstance(event, ProgressEvent):
+                    job.cancel()
+
+            with mock.patch.object(
+                job,
+                "resolve_model",
+                return_value=ResolvedModel("VR Architecture", "Fake Model", "vr"),
+            ), mock.patch.object(
+                job,
+                "_build_model",
+                return_value=fake_model,
+            ), mock.patch.object(
+                job,
+                "_create_separator",
+                side_effect=lambda _model, process_data: FakeSeparator(process_data),
+            ), mock.patch(
+                "uvr_core.jobs.clear_gpu_cache"
+            ):
+                with self.assertRaises(JobCancelledError):
+                    job.run(request, subscriber=subscriber)
+
+        self.assertTrue(any(isinstance(event, StatusEvent) and event.message == "Cancelled" for event in events))
+        self.assertTrue(any(isinstance(event, LogEvent) and event.message == "Processing cancelled." for event in events))
+
+
+class MainWindowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _make_state(self) -> AppState:
+        return AppState(
+            paths=PathsState(
+                input_paths=("input.wav",),
+                export_path="out",
+            ),
+            models=ModelSelectionState(
+                vr_model="Model A",
+                mdx_net_model="",
+                demucs_model="",
+                demucs_pre_proc_model="",
+                vocal_splitter_model="",
+                demucs_stems="All Stems",
+                mdx_stems="All Stems",
+            ),
+            output=OutputSettingsState(
+                save_format="WAV",
+                wav_type="PCM_16",
+                mp3_bitrate="320k",
+                add_model_name=False,
+                create_model_folder=False,
+            ),
+            processing=ProcessingSettingsState(
+                process_method="VR Architecture",
+                audio_tool="",
+                algorithm="",
+                device="DEFAULT",
+                use_gpu=True,
+                primary_stem_only=False,
+                secondary_stem_only=False,
+                normalize_output=False,
+                wav_ensemble=False,
+                testing_audio=False,
+                model_sample_mode=False,
+                model_sample_duration=30,
+            ),
+            advanced=AdvancedModelControlsState(
+                aggression_setting=5,
+                window_size=512,
+                batch_size="Default",
+                crop_size=256,
+                is_tta=False,
+                is_post_process=False,
+                is_high_end_process=False,
+                post_process_threshold=0.2,
+                margin=44100,
+                mdx_segment_size=256,
+                overlap="0.25",
+                overlap_mdx="Default",
+                shifts=2,
+                margin_demucs=44100,
+                compensate="Automatic",
+                mdx_batch_size="Default",
+                segment="Default",
+            ),
+        )
+
+    def test_save_format_switches_output_controls(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                self.assertFalse(window.mp3_bitrate_combo.isEnabled())
+                self.assertTrue(window.wav_type_combo.isEnabled())
+
+                window.save_format_combo.setCurrentText("MP3")
+
+                self.assertEqual(window.state.output.save_format, "MP3")
+                self.assertTrue(window.mp3_bitrate_combo.isEnabled())
+                self.assertFalse(window.wav_type_combo.isEnabled())
+            finally:
+                window.close()
+
+    def test_runtime_state_toggles_process_and_cancel_buttons(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                self.assertTrue(window.process_button.isEnabled())
+                self.assertFalse(window.cancel_button.isEnabled())
+                self.assertEqual(window.process_button.text(), "Process with GPU")
+
+                window._set_runtime(is_processing=True, can_cancel=True, status_text="Working")
+
+                self.assertFalse(window.process_button.isEnabled())
+                self.assertTrue(window.cancel_button.isEnabled())
+
+                window.gpu_checkbox.setChecked(False)
+
+                self.assertEqual(window.process_button.text(), "Process on CPU")
+            finally:
+                window.close()
+
+    def test_advanced_controls_are_collapsible_and_method_specific(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net", "Demucs")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                self.assertTrue(window.advanced_container.isHidden())
+                self.assertFalse(window.advanced_toggle_button.isChecked())
+
+                window.advanced_toggle_button.click()
+
+                self.assertFalse(window.advanced_container.isHidden())
+                self.assertFalse(window.vr_advanced_group.isHidden())
+                self.assertTrue(window.mdx_advanced_group.isHidden())
+
+                window.process_method_combo.setCurrentText("MDX-Net")
+
+                self.assertEqual(window.state.processing.process_method, "MDX-Net")
+                self.assertTrue(window.vr_advanced_group.isHidden())
+                self.assertFalse(window.mdx_advanced_group.isHidden())
+                self.assertTrue(window.demucs_advanced_group.isHidden())
+            finally:
+                window.close()
+
+    def test_composition_controls_update_state(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net", "Demucs")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                window.advanced_toggle_button.click()
+                window.process_method_combo.setCurrentText("Demucs")
+                window.demucs_stems_combo.setCurrentText("Vocals")
+                window.demucs_pre_proc_checkbox.setChecked(True)
+                window.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
+                window.vocal_splitter_checkbox.setChecked(True)
+                window.vocal_splitter_model_combo.setCurrentText("MDX-Net: Aux MDX")
+
+                self.assertEqual(window.state.models.demucs_stems, "Vocals")
+                self.assertEqual(window.state.models.demucs_pre_proc_model, "VR Architecture: Aux VR")
+                self.assertEqual(window.state.models.vocal_splitter_model, "MDX-Net: Aux MDX")
+                self.assertTrue(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
+                self.assertTrue(window.state.extra_settings["is_set_vocal_splitter"])
+            finally:
+                window.close()
 
 
 if __name__ == "__main__":

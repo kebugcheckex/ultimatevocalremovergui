@@ -1,6 +1,7 @@
 """State models for the PySide6 frontend."""
 
 from uvr_qt.state.app_state import (
+    AdvancedModelControlsState,
     AppState,
     ModelSelectionState,
     OutputSettingsState,
@@ -12,6 +13,7 @@ from uvr_qt.state.app_state import (
 from uvr_core.requests import SeparationRequest
 
 __all__ = [
+    "AdvancedModelControlsState",
     "AppState",
     "ModelSelectionState",
     "OutputSettingsState",
