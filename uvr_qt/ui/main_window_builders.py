@@ -8,7 +8,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -19,36 +18,16 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpinBox,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from gui_data.constants import (
-    ALL_STEMS,
-    BATCH_SIZE,
-    DEF_OPT,
-    DEMUCS_OVERLAP,
-    DEMUCS_SEGMENTS,
     FLAC,
-    MDX_OVERLAP,
-    MDX_SEGMENTS,
     MP3,
     MP3_BIT_RATES,
-    NO_MODEL,
-    STEM_SET_MENU,
-    VR_AGGRESSION,
-    VR_WINDOW,
     WAV,
     WAV_TYPE,
-)
-
-
-SECONDARY_MODEL_SLOTS = (
-    ("voc_inst", "Vocals / Instrumental"),
-    ("other", "Other / No Other"),
-    ("bass", "Bass / No Bass"),
-    ("drums", "Drums / No Drums"),
 )
 
 
@@ -283,196 +262,4 @@ def build_process_group(window: Any) -> QGroupBox:
     layout.addWidget(window.progress_bar)
     layout.addWidget(window.status_label)
     layout.addWidget(window.log_console)
-    layout.addWidget(build_advanced_group(window))
-    return group
-
-
-def build_advanced_group(window: Any) -> QGroupBox:
-    group = QGroupBox("Advanced Model Controls")
-    group_layout = QVBoxLayout(group)
-    group_layout.setContentsMargins(12, 12, 12, 12)
-    group_layout.setSpacing(10)
-
-    window.advanced_toggle_button = QToolButton(group)
-    window.advanced_toggle_button.setText("Show Advanced Controls")
-    window.advanced_toggle_button.setCheckable(True)
-    window.advanced_toggle_button.setChecked(False)
-    window.advanced_toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-    window.advanced_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
-    window.advanced_toggle_button.toggled.connect(window._toggle_advanced_controls)
-
-    window.advanced_container = QWidget(group)
-    window.advanced_container.setVisible(False)
-    advanced_layout = QVBoxLayout(window.advanced_container)
-    advanced_layout.setContentsMargins(0, 0, 0, 0)
-    advanced_layout.setSpacing(12)
-
-    window.vr_advanced_group = QGroupBox("VR")
-    vr_layout = QGridLayout(window.vr_advanced_group)
-    vr_layout.setHorizontalSpacing(12)
-    vr_layout.setVerticalSpacing(8)
-    window.vr_aggression_combo = QComboBox(window.vr_advanced_group)
-    window.vr_aggression_combo.addItems([str(value) for value in VR_AGGRESSION])
-    window.vr_aggression_combo.currentTextChanged.connect(window._on_vr_aggression_changed)
-    window.vr_window_combo = QComboBox(window.vr_advanced_group)
-    window.vr_window_combo.addItems(list(VR_WINDOW))
-    window.vr_window_combo.currentTextChanged.connect(window._on_vr_window_changed)
-    window.vr_batch_size_combo = QComboBox(window.vr_advanced_group)
-    window.vr_batch_size_combo.addItems(list(BATCH_SIZE))
-    window.vr_batch_size_combo.currentTextChanged.connect(window._on_vr_batch_size_changed)
-    window.vr_crop_size_spinbox = QSpinBox(window.vr_advanced_group)
-    window.vr_crop_size_spinbox.setRange(1, 4096)
-    window.vr_crop_size_spinbox.valueChanged.connect(window._on_vr_crop_size_changed)
-    window.vr_tta_checkbox = QCheckBox("TTA", window.vr_advanced_group)
-    window.vr_tta_checkbox.toggled.connect(window._on_vr_tta_changed)
-    window.vr_post_process_checkbox = QCheckBox("Post Process", window.vr_advanced_group)
-    window.vr_post_process_checkbox.toggled.connect(window._on_vr_post_process_changed)
-    window.vr_high_end_checkbox = QCheckBox("High End Mirroring", window.vr_advanced_group)
-    window.vr_high_end_checkbox.toggled.connect(window._on_vr_high_end_changed)
-    window.vr_post_process_threshold_spinbox = QDoubleSpinBox(window.vr_advanced_group)
-    window.vr_post_process_threshold_spinbox.setRange(0.0, 1.0)
-    window.vr_post_process_threshold_spinbox.setSingleStep(0.05)
-    window.vr_post_process_threshold_spinbox.valueChanged.connect(window._on_vr_post_process_threshold_changed)
-    vr_layout.addWidget(QLabel("Aggression"), 0, 0)
-    vr_layout.addWidget(window.vr_aggression_combo, 0, 1)
-    vr_layout.addWidget(QLabel("Window Size"), 1, 0)
-    vr_layout.addWidget(window.vr_window_combo, 1, 1)
-    vr_layout.addWidget(QLabel("Batch Size"), 2, 0)
-    vr_layout.addWidget(window.vr_batch_size_combo, 2, 1)
-    vr_layout.addWidget(QLabel("Crop Size"), 3, 0)
-    vr_layout.addWidget(window.vr_crop_size_spinbox, 3, 1)
-    vr_layout.addWidget(window.vr_tta_checkbox, 4, 0)
-    vr_layout.addWidget(window.vr_post_process_checkbox, 4, 1)
-    vr_layout.addWidget(window.vr_high_end_checkbox, 5, 0)
-    vr_layout.addWidget(QLabel("Post Threshold"), 5, 1)
-    vr_layout.addWidget(window.vr_post_process_threshold_spinbox, 5, 2)
-
-    window.mdx_advanced_group = QGroupBox("MDX")
-    mdx_layout = QGridLayout(window.mdx_advanced_group)
-    mdx_layout.setHorizontalSpacing(12)
-    mdx_layout.setVerticalSpacing(8)
-    window.mdx_stems_combo = QComboBox(window.mdx_advanced_group)
-    window.mdx_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
-    window.mdx_stems_combo.currentTextChanged.connect(window._on_mdx_stems_changed)
-    window.mdx_segment_size_combo = QComboBox(window.mdx_advanced_group)
-    window.mdx_segment_size_combo.setEditable(True)
-    window.mdx_segment_size_combo.addItems([str(value) for value in MDX_SEGMENTS])
-    window.mdx_segment_size_combo.currentTextChanged.connect(window._on_mdx_segment_size_changed)
-    window.mdx_overlap_combo = QComboBox(window.mdx_advanced_group)
-    window.mdx_overlap_combo.addItems([str(value) for value in MDX_OVERLAP])
-    window.mdx_overlap_combo.currentTextChanged.connect(window._on_mdx_overlap_changed)
-    window.mdx_batch_size_combo = QComboBox(window.mdx_advanced_group)
-    window.mdx_batch_size_combo.addItems(list(BATCH_SIZE))
-    window.mdx_batch_size_combo.currentTextChanged.connect(window._on_mdx_batch_size_changed)
-    window.mdx_margin_spinbox = QSpinBox(window.mdx_advanced_group)
-    window.mdx_margin_spinbox.setRange(0, 999999)
-    window.mdx_margin_spinbox.valueChanged.connect(window._on_mdx_margin_changed)
-    window.mdx_compensate_field = QLineEdit(window.mdx_advanced_group)
-    window.mdx_compensate_field.editingFinished.connect(window._on_mdx_compensate_changed)
-    mdx_layout.addWidget(QLabel("Stem Target"), 0, 0)
-    mdx_layout.addWidget(window.mdx_stems_combo, 0, 1)
-    mdx_layout.addWidget(QLabel("Segment Size"), 1, 0)
-    mdx_layout.addWidget(window.mdx_segment_size_combo, 1, 1)
-    mdx_layout.addWidget(QLabel("Overlap"), 2, 0)
-    mdx_layout.addWidget(window.mdx_overlap_combo, 2, 1)
-    mdx_layout.addWidget(QLabel("Batch Size"), 3, 0)
-    mdx_layout.addWidget(window.mdx_batch_size_combo, 3, 1)
-    mdx_layout.addWidget(QLabel("Margin"), 4, 0)
-    mdx_layout.addWidget(window.mdx_margin_spinbox, 4, 1)
-    mdx_layout.addWidget(QLabel("Compensate"), 5, 0)
-    mdx_layout.addWidget(window.mdx_compensate_field, 5, 1)
-
-    window.demucs_advanced_group = QGroupBox("Demucs")
-    demucs_layout = QGridLayout(window.demucs_advanced_group)
-    demucs_layout.setHorizontalSpacing(12)
-    demucs_layout.setVerticalSpacing(8)
-    window.demucs_stems_combo = QComboBox(window.demucs_advanced_group)
-    window.demucs_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
-    window.demucs_stems_combo.currentTextChanged.connect(window._on_demucs_stems_changed)
-    window.demucs_segment_combo = QComboBox(window.demucs_advanced_group)
-    window.demucs_segment_combo.addItems([str(value) for value in DEMUCS_SEGMENTS])
-    window.demucs_segment_combo.currentTextChanged.connect(window._on_demucs_segment_changed)
-    window.demucs_overlap_combo = QComboBox(window.demucs_advanced_group)
-    window.demucs_overlap_combo.addItems([str(value) for value in DEMUCS_OVERLAP])
-    window.demucs_overlap_combo.currentTextChanged.connect(window._on_demucs_overlap_changed)
-    window.demucs_shifts_spinbox = QSpinBox(window.demucs_advanced_group)
-    window.demucs_shifts_spinbox.setRange(0, 100)
-    window.demucs_shifts_spinbox.valueChanged.connect(window._on_demucs_shifts_changed)
-    window.demucs_margin_spinbox = QSpinBox(window.demucs_advanced_group)
-    window.demucs_margin_spinbox.setRange(0, 999999)
-    window.demucs_margin_spinbox.valueChanged.connect(window._on_demucs_margin_changed)
-    demucs_layout.addWidget(QLabel("Stem Target"), 0, 0)
-    demucs_layout.addWidget(window.demucs_stems_combo, 0, 1)
-    demucs_layout.addWidget(QLabel("Segment"), 1, 0)
-    demucs_layout.addWidget(window.demucs_segment_combo, 1, 1)
-    demucs_layout.addWidget(QLabel("Overlap"), 2, 0)
-    demucs_layout.addWidget(window.demucs_overlap_combo, 2, 1)
-    demucs_layout.addWidget(QLabel("Shifts"), 3, 0)
-    demucs_layout.addWidget(window.demucs_shifts_spinbox, 3, 1)
-    demucs_layout.addWidget(QLabel("Margin"), 4, 0)
-    demucs_layout.addWidget(window.demucs_margin_spinbox, 4, 1)
-
-    window.composition_group = QGroupBox("Workflow Composition")
-    composition_layout = QGridLayout(window.composition_group)
-    composition_layout.setHorizontalSpacing(12)
-    composition_layout.setVerticalSpacing(8)
-    window.demucs_pre_proc_checkbox = QCheckBox("Enable Demucs Pre-Proc", window.composition_group)
-    window.demucs_pre_proc_checkbox.toggled.connect(window._on_demucs_pre_proc_enabled_changed)
-    window.demucs_pre_proc_model_combo = QComboBox(window.composition_group)
-    window.demucs_pre_proc_model_combo.currentTextChanged.connect(window._on_demucs_pre_proc_model_changed)
-    window.demucs_pre_proc_inst_mix_checkbox = QCheckBox("Save Instrumental Mixture", window.composition_group)
-    window.demucs_pre_proc_inst_mix_checkbox.toggled.connect(window._on_demucs_pre_proc_inst_mix_changed)
-    window.vocal_splitter_checkbox = QCheckBox("Enable Vocal Splitter", window.composition_group)
-    window.vocal_splitter_checkbox.toggled.connect(window._on_vocal_splitter_enabled_changed)
-    window.vocal_splitter_model_combo = QComboBox(window.composition_group)
-    window.vocal_splitter_model_combo.currentTextChanged.connect(window._on_vocal_splitter_model_changed)
-    window.vocal_splitter_save_inst_checkbox = QCheckBox("Save Split Instrumentals", window.composition_group)
-    window.vocal_splitter_save_inst_checkbox.toggled.connect(window._on_vocal_splitter_save_inst_changed)
-    composition_layout.addWidget(window.demucs_pre_proc_checkbox, 0, 0, 1, 2)
-    composition_layout.addWidget(QLabel("Pre-Proc Model"), 1, 0)
-    composition_layout.addWidget(window.demucs_pre_proc_model_combo, 1, 1)
-    composition_layout.addWidget(window.demucs_pre_proc_inst_mix_checkbox, 2, 0, 1, 2)
-    composition_layout.addWidget(window.vocal_splitter_checkbox, 3, 0, 1, 2)
-    composition_layout.addWidget(QLabel("Vocal Splitter Model"), 4, 0)
-    composition_layout.addWidget(window.vocal_splitter_model_combo, 4, 1)
-    composition_layout.addWidget(window.vocal_splitter_save_inst_checkbox, 5, 0, 1, 2)
-
-    window.secondary_models_group = QGroupBox("Secondary Models")
-    secondary_layout = QGridLayout(window.secondary_models_group)
-    secondary_layout.setHorizontalSpacing(12)
-    secondary_layout.setVerticalSpacing(8)
-    window.secondary_models_checkbox = QCheckBox(
-        "Enable secondary models for selected method",
-        window.secondary_models_group,
-    )
-    window.secondary_models_checkbox.toggled.connect(window._on_secondary_models_enabled_changed)
-    secondary_layout.addWidget(window.secondary_models_checkbox, 0, 0, 1, 3)
-    secondary_layout.addWidget(QLabel("Stem"), 1, 0)
-    secondary_layout.addWidget(QLabel("Model"), 1, 1)
-    secondary_layout.addWidget(QLabel("Scale"), 1, 2)
-    for row_index, (slot, label) in enumerate(SECONDARY_MODEL_SLOTS, start=2):
-        combo = QComboBox(window.secondary_models_group)
-        combo.currentTextChanged.connect(
-            lambda value, slot=slot: window._on_secondary_model_changed(slot, value)
-        )
-        scale = QDoubleSpinBox(window.secondary_models_group)
-        scale.setRange(0.01, 0.99)
-        scale.setSingleStep(0.01)
-        scale.setDecimals(2)
-        scale.valueChanged.connect(
-            lambda value, slot=slot: window._on_secondary_model_scale_changed(slot, value)
-        )
-        window.secondary_model_combos[slot] = combo
-        window.secondary_scale_spinboxes[slot] = scale
-        secondary_layout.addWidget(QLabel(label), row_index, 0)
-        secondary_layout.addWidget(combo, row_index, 1)
-        secondary_layout.addWidget(scale, row_index, 2)
-
-    advanced_layout.addWidget(window.vr_advanced_group)
-    advanced_layout.addWidget(window.mdx_advanced_group)
-    advanced_layout.addWidget(window.demucs_advanced_group)
-    advanced_layout.addWidget(window.composition_group)
-    advanced_layout.addWidget(window.secondary_models_group)
-    group_layout.addWidget(window.advanced_toggle_button)
-    group_layout.addWidget(window.advanced_container)
     return group

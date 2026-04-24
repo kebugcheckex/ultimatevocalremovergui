@@ -1741,22 +1741,24 @@ class MainWindowTests(unittest.TestCase):
         with mock.patch("uvr_qt.ui.main_window.save_settings"):
             window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
             try:
-                self.assertTrue(window.advanced_container.isHidden())
-                self.assertFalse(window.advanced_toggle_button.isChecked())
+                self.assertIsNone(window._advanced_dialog)
 
-                window.advanced_toggle_button.click()
+                window._open_advanced_settings()
 
-                self.assertFalse(window.advanced_container.isHidden())
-                self.assertFalse(window.vr_advanced_group.isHidden())
-                self.assertTrue(window.mdx_advanced_group.isHidden())
+                d = window._advanced_dialog
+                self.assertIsNotNone(d)
+                self.assertFalse(d.vr_advanced_group.isHidden())
+                self.assertTrue(d.mdx_advanced_group.isHidden())
 
                 window.process_method_combo.setCurrentText("MDX-Net")
 
                 self.assertEqual(window.state.processing.process_method, "MDX-Net")
-                self.assertTrue(window.vr_advanced_group.isHidden())
-                self.assertFalse(window.mdx_advanced_group.isHidden())
-                self.assertTrue(window.demucs_advanced_group.isHidden())
+                self.assertTrue(d.vr_advanced_group.isHidden())
+                self.assertFalse(d.mdx_advanced_group.isHidden())
+                self.assertTrue(d.demucs_advanced_group.isHidden())
             finally:
+                if window._advanced_dialog:
+                    window._advanced_dialog.close()
                 window.close()
 
     def test_composition_controls_update_state(self) -> None:
@@ -1790,12 +1792,13 @@ class MainWindowTests(unittest.TestCase):
         with mock.patch("uvr_qt.ui.main_window.save_settings"):
             window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
             try:
-                window.advanced_toggle_button.click()
+                window._open_advanced_settings()
+                d = window._advanced_dialog
                 window.process_method_combo.setCurrentText("Demucs")
-                window.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
-                window.demucs_pre_proc_checkbox.setChecked(True)
-                window.vocal_splitter_checkbox.setChecked(True)
-                window.vocal_splitter_model_combo.setCurrentText("MDX-Net: Aux MDX")
+                d.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
+                d.demucs_pre_proc_checkbox.setChecked(True)
+                d.vocal_splitter_checkbox.setChecked(True)
+                d.vocal_splitter_model_combo.setCurrentText("MDX-Net: Aux MDX")
 
                 self.assertEqual(window.state.models.demucs_stems, ALL_STEMS)
                 self.assertEqual(window.state.models.demucs_pre_proc_model, "VR Architecture: Aux VR")
@@ -1803,6 +1806,8 @@ class MainWindowTests(unittest.TestCase):
                 self.assertTrue(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
                 self.assertTrue(window.state.extra_settings["is_set_vocal_splitter"])
             finally:
+                if window._advanced_dialog:
+                    window._advanced_dialog.close()
                 window.close()
 
     def test_common_workflow_normalization_disables_demucs_pre_proc_for_vocal_target(self) -> None:
@@ -1834,19 +1839,22 @@ class MainWindowTests(unittest.TestCase):
         with mock.patch("uvr_qt.ui.main_window.save_settings"):
             window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
             try:
-                window.advanced_toggle_button.click()
+                window._open_advanced_settings()
+                d = window._advanced_dialog
                 window.process_method_combo.setCurrentText("Demucs")
-                window.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
-                window.demucs_pre_proc_checkbox.setChecked(True)
+                d.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
+                d.demucs_pre_proc_checkbox.setChecked(True)
 
                 self.assertTrue(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
 
-                window.demucs_stems_combo.setCurrentText(VOCAL_STEM)
+                d.demucs_stems_combo.setCurrentText(VOCAL_STEM)
 
                 self.assertEqual(window.state.models.demucs_stems, VOCAL_STEM)
                 self.assertFalse(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
                 self.assertFalse(window.state.extra_settings["is_demucs_pre_proc_model_inst_mix"])
             finally:
+                if window._advanced_dialog:
+                    window._advanced_dialog.close()
                 window.close()
 
     def test_process_button_disables_when_vocal_splitter_has_no_model(self) -> None:
@@ -1910,7 +1918,7 @@ class MainWindowTests(unittest.TestCase):
                 return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
 
         with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
-            "uvr_qt.ui.main_window_support.QMessageBox"
+            "uvr_qt.ui.dialogs.info_dialogs.QMessageBox"
         ) as message_box:
             window = MainWindow(state=self._make_state(), processing_facade=FakeFacade(), config_path="qt-config.yaml")
             try:
@@ -2022,18 +2030,19 @@ class MainWindowTests(unittest.TestCase):
                 models=replace(self._make_state().models, mdx_net_model="Model B"),
             )
             with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
-                "uvr_qt.ui.main_window_support.QInputDialog.getText",
+                "uvr_qt.ui.dialogs.profiles_dialog.QInputDialog.getText",
                 return_value=("MDX Profile", True),
             ):
                 window = MainWindow(state=state, processing_facade=FakeFacade(), profile_store=profile_store)
                 try:
-                    window._save_profile()
+                    window._open_profiles_dialog()
+                    window._profiles_dialog._save_profile()
 
                     self.assertEqual(profile_store.list_profiles(), ("MDX Profile",))
                     saved_profile = profile_store.load_profile("MDX Profile")
                     self.assertEqual(saved_profile["chosen_process_method"], "MDX-Net")
                     self.assertEqual(saved_profile["mdx_net_model"], "Model B")
-                    self.assertEqual(window.profile_combo.currentText(), "MDX Profile")
+                    self.assertEqual(window._profiles_dialog._combo.currentText(), "MDX Profile")
                 finally:
                     window.close()
         finally:
@@ -2078,8 +2087,9 @@ class MainWindowTests(unittest.TestCase):
             with mock.patch("uvr_qt.ui.main_window.save_settings"):
                 window = MainWindow(state=state, processing_facade=FakeFacade(), profile_store=profile_store)
                 try:
-                    window.profile_combo.setCurrentText("MDX Profile")
-                    window._load_profile()
+                    window._open_profiles_dialog()
+                    window._profiles_dialog._combo.setCurrentText("MDX Profile")
+                    window._profiles_dialog._load_profile()
 
                     self.assertEqual(window.state.processing.process_method, "MDX-Net")
                     self.assertEqual(window.state.models.mdx_net_model, "Model B")
@@ -2119,16 +2129,17 @@ class MainWindowTests(unittest.TestCase):
         try:
             profile_store.save_profile("Delete Me", DEFAULT_DATA)
             with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
-                "uvr_qt.ui.main_window_support.QMessageBox.question",
+                "uvr_qt.ui.dialogs.profiles_dialog.QMessageBox.question",
                 return_value=QMessageBox.StandardButton.Yes,
             ):
                 window = MainWindow(state=self._make_state(), processing_facade=FakeFacade(), profile_store=profile_store)
                 try:
-                    window.profile_combo.setCurrentText("Delete Me")
-                    window._delete_profile()
+                    window._open_profiles_dialog()
+                    window._profiles_dialog._combo.setCurrentText("Delete Me")
+                    window._profiles_dialog._delete_profile()
 
                     self.assertEqual(profile_store.list_profiles(), ())
-                    self.assertEqual(window.profile_combo.count(), 0)
+                    self.assertEqual(window._profiles_dialog._combo.count(), 0)
                 finally:
                     window.close()
         finally:

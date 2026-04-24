@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import traceback
-
-from PySide6.QtCore import QObject, QThread, Qt, Signal
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QGridLayout,
@@ -25,6 +23,7 @@ from gui_data.constants import DEMUCS_ARCH_TYPE, MDX_ARCH_TYPE, VR_ARCH_PM
 from uvr_core.jobs import AvailableDownloads, CatalogRefreshResult, DownloadJobResult
 from uvr_core.requests import DownloadRequest
 from uvr_qt.services import DownloadFacade
+from uvr_qt.ui.download_workers import CatalogRefreshWorker, DownloadWorker
 
 
 class DownloadManagerWindow(QMainWindow):
@@ -177,7 +176,7 @@ class DownloadManagerWindow(QMainWindow):
 
         vip_code = self.vip_code_field.text().strip()
         self.refresh_thread = QThread(self)
-        self.refresh_worker = _CatalogRefreshWorker(self.download_facade, vip_code=vip_code)
+        self.refresh_worker = CatalogRefreshWorker(self.download_facade, vip_code=vip_code)
         self.refresh_worker.moveToThread(self.refresh_thread)
         self.refresh_thread.started.connect(self.refresh_worker.run)
         self.refresh_worker.finished.connect(self._refresh_finished)
@@ -200,7 +199,7 @@ class DownloadManagerWindow(QMainWindow):
         self._set_busy(True)
 
         self.download_thread = QThread(self)
-        self.download_worker = _DownloadWorker(
+        self.download_worker = DownloadWorker(
             self.download_facade,
             request=DownloadRequest(
                 model_type=model_type,
@@ -271,45 +270,3 @@ class DownloadManagerWindow(QMainWindow):
         self._set_busy(False)
 
 
-class _CatalogRefreshWorker(QObject):
-    finished = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, facade: DownloadFacade, *, vip_code: str) -> None:
-        super().__init__()
-        self.facade = facade
-        self.vip_code = vip_code
-
-    def run(self) -> None:
-        try:
-            result = self.facade.refresh_catalog(vip_code=self.vip_code)
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
-            return
-        self.finished.emit(result)
-
-
-class _DownloadWorker(QObject):
-    finished = Signal(object)
-    failed = Signal(str)
-    log_emitted = Signal(str)
-    progress_emitted = Signal(int)
-    status_emitted = Signal(str)
-
-    def __init__(self, facade: DownloadFacade, *, request: DownloadRequest) -> None:
-        super().__init__()
-        self.facade = facade
-        self.request = request
-
-    def run(self) -> None:
-        try:
-            result = self.facade.download(
-                self.request,
-                log=self.log_emitted.emit,
-                progress=lambda value: self.progress_emitted.emit(int(max(0, min(value, 100)))),
-                status=self.status_emitted.emit,
-            )
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
-            return
-        self.finished.emit(result)
