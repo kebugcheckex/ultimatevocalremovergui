@@ -9,6 +9,15 @@ from gui_data.constants import DEFAULT_DATA
 from uvr.config.models import AppSettings
 
 
+SECONDARY_MODEL_KEYS = tuple(key for key in DEFAULT_DATA if key.endswith("_secondary_model"))
+SECONDARY_MODEL_SCALE_KEYS = tuple(key for key in DEFAULT_DATA if key.endswith("_secondary_model_scale"))
+SECONDARY_MODEL_ACTIVATION_KEYS = (
+    "vr_is_secondary_model_activate",
+    "mdx_is_secondary_model_activate",
+    "demucs_is_secondary_model_activate",
+)
+
+
 @dataclass(frozen=True)
 class ModelSelectionRequest:
     vr_model: str
@@ -19,6 +28,8 @@ class ModelSelectionRequest:
     demucs_stems: str
     mdx_stems: str
     secondary_models: dict[str, str] = field(default_factory=dict)
+    secondary_model_scales: dict[str, float] = field(default_factory=dict)
+    secondary_model_activations: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -102,6 +113,21 @@ class SeparationRequest:
             "mdx_other_secondary_model",
             "mdx_bass_secondary_model",
             "mdx_drums_secondary_model",
+            "vr_is_secondary_model_activate",
+            "vr_voc_inst_secondary_model_scale",
+            "vr_other_secondary_model_scale",
+            "vr_bass_secondary_model_scale",
+            "vr_drums_secondary_model_scale",
+            "demucs_is_secondary_model_activate",
+            "demucs_voc_inst_secondary_model_scale",
+            "demucs_other_secondary_model_scale",
+            "demucs_bass_secondary_model_scale",
+            "demucs_drums_secondary_model_scale",
+            "mdx_is_secondary_model_activate",
+            "mdx_voc_inst_secondary_model_scale",
+            "mdx_other_secondary_model_scale",
+            "mdx_bass_secondary_model_scale",
+            "mdx_drums_secondary_model_scale",
             "save_format",
             "wav_type_set",
             "mp3_bit_set",
@@ -133,8 +159,15 @@ class SeparationRequest:
                 mdx_stems=str(values.get("mdx_stems", "")),
                 secondary_models={
                     key: str(values.get(key, ""))
-                    for key in DEFAULT_DATA
-                    if key.endswith("_secondary_model")
+                    for key in SECONDARY_MODEL_KEYS
+                },
+                secondary_model_scales={
+                    key: float(values.get(key, DEFAULT_DATA.get(key, 0.5)))
+                    for key in SECONDARY_MODEL_SCALE_KEYS
+                },
+                secondary_model_activations={
+                    key: bool(values.get(key, DEFAULT_DATA.get(key, False)))
+                    for key in SECONDARY_MODEL_ACTIVATION_KEYS
                 },
             ),
             output=OutputSettingsRequest(

@@ -11,7 +11,7 @@ import yaml
 from uvr.config.models import AppSettings
 
 
-DEFAULT_DATA_FILE = Path("config.yaml")
+DEFAULT_DATA_FILE = Path("data") / "config.yaml"
 LEGACY_DATA_FILE = Path("data.pkl")
 
 
@@ -29,6 +29,7 @@ def save_settings(
         payload = dict(settings)
 
     path = Path(data_file) if data_file is not None else DEFAULT_DATA_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() == ".pkl":
         with path.open("wb") as data_handle:
             pickle.dump(payload, data_handle)

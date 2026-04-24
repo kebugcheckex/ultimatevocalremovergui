@@ -51,10 +51,10 @@ Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_
 - The CLI is runnable standalone via `python -m uvr_cli` and does not require `PySide6` or any Phase 4 Qt module.
 - `uvr_qt/` now has a runnable PySide6 shell via `python -m uvr_qt.app`, typed app state, a main window, and a thin processing facade over `uvr_core`.
 - The Qt main workflow now supports input/output selection, process-method/model selection, start/cancel, progress/log display, persistence through `uvr/config`, and a collapsible advanced-controls panel for VR/MDX/Demucs settings.
-- The Qt window also now exposes MDX/Demucs stem targeting plus first-pass workflow-composition controls for Demucs pre-proc and vocal-splitter selection using shared `uvr_core` resolver hooks.
+- The Qt window also now exposes MDX/Demucs stem targeting, first-pass workflow-composition controls for Demucs pre-proc and vocal-splitter selection, and typed per-stem secondary-model assignment/scales using shared `uvr_core` resolver hooks.
 - `uvr_qt/` now also has a separate download-manager window backed by `uvr_core.jobs.DownloadJob`, covering catalog refresh, VIP code entry, model-type filtering, download progress, and logs.
-- Persistence now defaults to YAML (`config.yaml`) with compatibility loading from legacy `data.pkl` and one-shot migration on first read of the new default path.
-- Full Tk parity is not reached: per-stem secondary-model assignment/scales, audio-tool UI, ensemble helpers, model/default editors, and the remaining popup-driven workflows still live outside the Qt frontend.
+- Persistence now defaults to YAML (`data/config.yaml`) with compatibility loading from legacy `data.pkl` and one-shot migration on first read of the new default path.
+- Full Tk parity is not reached: audio-tool UI, ensemble helpers, model/default editors, and the remaining popup-driven workflows still live outside the Qt frontend.
 - `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
 - Downloads, cache, model catalog, ensemble, and audio tools are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state for the legacy app shell.
 
@@ -133,13 +133,14 @@ Current progress:
 - `uvr_qt/ui/main_window.py` now supports the primary separation shell: input/output selection, model reloading, output/tuning controls, processing progress/logs, and cancellation.
 - `uvr_core.jobs.SeparationJob` now supports cancellation and auxiliary-model resolution for the Qt adapter.
 - The Qt advanced panel now covers VR/MDX/Demucs numeric controls, MDX/Demucs stem selection, and first-pass workflow composition for Demucs pre-proc and vocal-splitter selection.
+- The Qt advanced panel now also exposes typed per-stem secondary-model assignment and secondary scales for VR, MDX, and Demucs workflows, backed by `uvr_core` resolver hooks instead of Tk callbacks.
+- The shared backend and Qt shell now validate the common Demucs/MDX composition rules needed for the first release, including model-specific stem targeting plus Demucs pre-proc/vocal-splitter guardrails.
 - `uvr_qt/ui/download_manager_window.py` now provides a separate download-manager window wired to the shared download/catalog job surface.
 
-Still missing before Phase 4 can be called done:
+Phase 4 exit status:
 
-- typed per-stem secondary-model selection and scaling
-- broader validation around incompatible model-composition combinations
-- enough non-default workflow coverage to stop relying on Tk menus for common separation setups
+- the first-release Qt app now covers the primary separation workflow without reading from `UVR.py`
+- rarer popup-era composition variants and combine-stem permutations remain deferred to later Qt phases rather than blocking the Phase 4 handoff
 
 **Exit:** Qt app replaces Tk for the primary separation workflow without reading from `UVR.py`.
 
@@ -159,7 +160,7 @@ Current progress:
 ### Phase 6 — Retire Tk
 
 - Delete `UVR.py` and `uvr/ui/` (Tk-only modules).
-- Finish the persistence migration off raw pickle. The repo now defaults to YAML-backed `config.yaml` with compatibility loading from legacy `data.pkl`, but the Tk shell and docs still need to be fully normalized around the new format.
+- Finish the persistence migration off raw pickle. The repo now defaults to YAML-backed `data/config.yaml` with compatibility loading from legacy `data.pkl`, but the Tk shell and docs still need to be fully normalized around the new format.
 - Mark `uvr_core` as stable; document the public surface.
 
 **Exit:** a fresh clone of the repo contains no `tkinter` imports.
@@ -207,7 +208,7 @@ Whatever event schema `uvr_core/events.py` ships with will be what a future web 
 `data.pkl` is a raw pickle of a dict. Any change to `DEFAULT_DATA` or Python version can break it.
 
 - **Risk:** a GUI/CLI that reads `data.pkl` may load arbitrary attacker-controlled objects if the file is shared.
-- **Mitigation:** the codebase now defaults to YAML-backed `config.yaml` and can migrate legacy pickle settings on read; the remaining work is to finish normalizing the surrounding UX/docs and eventually remove pickle compatibility when it is safe to do so.
+- **Mitigation:** the codebase now defaults to YAML-backed `data/config.yaml` and can migrate legacy pickle settings on read; the remaining work is to finish normalizing the surrounding UX/docs and eventually remove pickle compatibility when it is safe to do so.
 
 ### 5. Cancellation and concurrency
 

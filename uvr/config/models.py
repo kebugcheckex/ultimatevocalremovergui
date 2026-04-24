@@ -21,14 +21,29 @@ MODEL_SELECTION_KEYS = (
     "vr_other_secondary_model",
     "vr_bass_secondary_model",
     "vr_drums_secondary_model",
+    "vr_is_secondary_model_activate",
+    "vr_voc_inst_secondary_model_scale",
+    "vr_other_secondary_model_scale",
+    "vr_bass_secondary_model_scale",
+    "vr_drums_secondary_model_scale",
     "demucs_voc_inst_secondary_model",
     "demucs_other_secondary_model",
     "demucs_bass_secondary_model",
     "demucs_drums_secondary_model",
+    "demucs_is_secondary_model_activate",
+    "demucs_voc_inst_secondary_model_scale",
+    "demucs_other_secondary_model_scale",
+    "demucs_bass_secondary_model_scale",
+    "demucs_drums_secondary_model_scale",
     "mdx_voc_inst_secondary_model",
     "mdx_other_secondary_model",
     "mdx_bass_secondary_model",
     "mdx_drums_secondary_model",
+    "mdx_is_secondary_model_activate",
+    "mdx_voc_inst_secondary_model_scale",
+    "mdx_other_secondary_model_scale",
+    "mdx_bass_secondary_model_scale",
+    "mdx_drums_secondary_model_scale",
 )
 
 PROCESS_SETTINGS_KEYS = (
@@ -71,6 +86,8 @@ class ModelSelection:
     demucs_stems: str
     mdx_stems: str
     secondary_models: dict[str, str]
+    secondary_model_scales: dict[str, float]
+    secondary_model_activations: dict[str, bool]
 
 
 @dataclass(frozen=True)
@@ -145,6 +162,16 @@ class AppSettings:
             for key in MODEL_SELECTION_KEYS
             if key.endswith("_secondary_model")
         }
+        secondary_model_scales = {
+            key: float(self.values.get(key, 0.5))
+            for key in MODEL_SELECTION_KEYS
+            if key.endswith("_secondary_model_scale")
+        }
+        secondary_model_activations = {
+            key: bool(self.values.get(key, False))
+            for key in MODEL_SELECTION_KEYS
+            if key.endswith("_is_secondary_model_activate")
+        }
         return ModelSelection(
             vr_model=str(self.values["vr_model"]),
             demucs_model=str(self.values["demucs_model"]),
@@ -154,6 +181,8 @@ class AppSettings:
             demucs_stems=str(self.values["demucs_stems"]),
             mdx_stems=str(self.values["mdx_stems"]),
             secondary_models=secondary_models,
+            secondary_model_scales=secondary_model_scales,
+            secondary_model_activations=secondary_model_activations,
         )
 
     @property

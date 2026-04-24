@@ -14,6 +14,9 @@ from uvr_core.requests import (
     ModelSelectionRequest,
     OutputSettingsRequest,
     ProcessingOptionsRequest,
+    SECONDARY_MODEL_ACTIVATION_KEYS,
+    SECONDARY_MODEL_KEYS,
+    SECONDARY_MODEL_SCALE_KEYS,
     SeparationRequest,
 )
 
@@ -44,6 +47,8 @@ class ModelSelectionState:
     demucs_stems: str
     mdx_stems: str
     secondary_models: dict[str, str] = field(default_factory=dict)
+    secondary_model_scales: dict[str, float] = field(default_factory=dict)
+    secondary_model_activations: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -147,20 +152,15 @@ class AppState:
             mdx_stems=str(values.get("mdx_stems", "")),
             secondary_models={
                 key: str(values.get(key, ""))
-                for key in (
-                    "vr_voc_inst_secondary_model",
-                    "vr_other_secondary_model",
-                    "vr_bass_secondary_model",
-                    "vr_drums_secondary_model",
-                    "demucs_voc_inst_secondary_model",
-                    "demucs_other_secondary_model",
-                    "demucs_bass_secondary_model",
-                    "demucs_drums_secondary_model",
-                    "mdx_voc_inst_secondary_model",
-                    "mdx_other_secondary_model",
-                    "mdx_bass_secondary_model",
-                    "mdx_drums_secondary_model",
-                )
+                for key in SECONDARY_MODEL_KEYS
+            },
+            secondary_model_scales={
+                key: float(values.get(key, DEFAULT_DATA.get(key, 0.5)))
+                for key in SECONDARY_MODEL_SCALE_KEYS
+            },
+            secondary_model_activations={
+                key: bool(values.get(key, DEFAULT_DATA.get(key, False)))
+                for key in SECONDARY_MODEL_ACTIVATION_KEYS
             },
         )
 
@@ -223,18 +223,9 @@ class AppState:
             "set_vocal_splitter",
             "demucs_stems",
             "mdx_stems",
-            "vr_voc_inst_secondary_model",
-            "vr_other_secondary_model",
-            "vr_bass_secondary_model",
-            "vr_drums_secondary_model",
-            "demucs_voc_inst_secondary_model",
-            "demucs_other_secondary_model",
-            "demucs_bass_secondary_model",
-            "demucs_drums_secondary_model",
-            "mdx_voc_inst_secondary_model",
-            "mdx_other_secondary_model",
-            "mdx_bass_secondary_model",
-            "mdx_drums_secondary_model",
+            *SECONDARY_MODEL_KEYS,
+            *SECONDARY_MODEL_SCALE_KEYS,
+            *SECONDARY_MODEL_ACTIVATION_KEYS,
             "save_format",
             "wav_type_set",
             "mp3_bit_set",
@@ -338,6 +329,8 @@ class AppState:
             }
         )
         payload.update(self.models.secondary_models)
+        payload.update(self.models.secondary_model_scales)
+        payload.update(self.models.secondary_model_activations)
         return payload
 
     def to_separation_request(self) -> SeparationRequest:
@@ -354,6 +347,8 @@ class AppState:
                 demucs_stems=self.models.demucs_stems,
                 mdx_stems=self.models.mdx_stems,
                 secondary_models=dict(self.models.secondary_models),
+                secondary_model_scales=dict(self.models.secondary_model_scales),
+                secondary_model_activations=dict(self.models.secondary_model_activations),
             ),
             output=OutputSettingsRequest(
                 save_format=self.output.save_format,
@@ -398,7 +393,7 @@ class AppState:
             extra_settings=dict(self.extra_settings),
         )
 
-def load_app_state(data_file: str | Path = "config.yaml") -> AppState:
+def load_app_state(data_file: str | Path | None = None) -> AppState:
     """Load persisted settings into the new Qt state model."""
     settings = load_settings(default_data=DEFAULT_DATA, data_file=data_file)
     return AppState.from_settings(settings)

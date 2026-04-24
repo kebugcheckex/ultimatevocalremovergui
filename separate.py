@@ -20,18 +20,36 @@ import gzip
 import librosa
 import math
 import numpy as np
-import onnxruntime as ort
 import os
 import torch
 import warnings
 import pydub
 import soundfile as sf
+import gc
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
+
+class _UnavailableInferenceSession:
+    def __init__(self, *_args, **_kwargs):
+        raise ImportError("ONNX Runtime Python API is unavailable.")
+
+
+if ort is not None and not hasattr(ort, 'InferenceSession'):
+    # Some broken installs leave an empty namespace package. torchmetrics imports
+    # this symbol at module import time even when DNSMOS is unused.
+    ort.InferenceSession = _UnavailableInferenceSession
+if ort is not None and not hasattr(ort, 'get_available_providers'):
+    ort.get_available_providers = lambda: []
+
 import lib_v5.mdxnet as MdxnetSet
 import math
 #import random
 from onnx import load
 from onnx2pytorch import ConvertModel
-import gc
  
 if TYPE_CHECKING:
     from UVR import ModelData
@@ -61,6 +79,21 @@ def clear_gpu_cache():
         torch.mps.empty_cache()
     else:
         torch.cuda.empty_cache()
+
+
+def is_cuda_device(device):
+    return isinstance(device, str) and device.startswith(CUDA_DEVICE)
+
+
+def mdx_should_use_onnxruntime(mdx_segment_size, dim_t, is_other_gpu, device, run_type):
+    if ort is None or not hasattr(ort, 'InferenceSession') or not hasattr(ort, 'get_available_providers'):
+        return False
+    if mdx_segment_size != dim_t or is_other_gpu:
+        return False
+    if is_cuda_device(device) and 'CUDAExecutionProvider' not in ort.get_available_providers():
+        return False
+    return bool(run_type)
+
 
 warnings.filterwarnings("ignore")
 cpu = torch.device('cpu')
@@ -190,7 +223,7 @@ class SeperateAttributes:
                 #     self.is_other_gpu = True
                 if cuda_available:# and not self.is_use_opencl:
                     self.device = CUDA_DEVICE if not device_prefix else f'{device_prefix}:{self.device_set}'
-                    self.run_type = ['CUDAExecutionProvider']
+                    self.run_type = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
         if model_data.process_method == MDX_ARCH_TYPE:
             self.is_mdx_ckpt = model_data.is_mdx_ckpt
@@ -486,7 +519,13 @@ class SeperateMDX(SeperateAttributes):
                 separator = MdxnetSet.ConvTDFNet(**model_params)
                 self.model_run = separator.load_from_checkpoint(self.model_path).to(self.device).eval()
             else:
-                if self.mdx_segment_size == self.dim_t and not self.is_other_gpu:
+                if mdx_should_use_onnxruntime(
+                    self.mdx_segment_size,
+                    self.dim_t,
+                    self.is_other_gpu,
+                    self.device,
+                    self.run_type,
+                ):
                     ort_ = ort.InferenceSession(self.model_path, providers=self.run_type)
                     self.model_run = lambda spek:ort_.run(None, {'input': spek.cpu().numpy()})[0]
                 else:

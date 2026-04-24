@@ -8,13 +8,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import yaml
 from click.testing import CliRunner
-from gui_data.constants import ALIGN_INPUTS, CHANGE_PITCH, DEFAULT_DATA, MATCH_INPUTS, TIME_STRETCH, VR_ARCH_PM
+from gui_data.constants import ALIGN_INPUTS, ALL_STEMS, CHANGE_PITCH, DEFAULT_DATA, ENSEMBLE_PARTITION, INST_STEM, MATCH_INPUTS, NO_MODEL, TIME_STRETCH, VOCAL_STEM, VR_ARCH_PM
 from uvr.config.models import AppSettings
 from uvr.config.persistence import DEFAULT_DATA_FILE, load_settings, save_settings
 from uvr.runtime import RuntimePaths, build_runtime_paths
@@ -42,6 +43,7 @@ from uvr_core.jobs import (
 )
 from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
 from uvr_cli.__main__ import cli
+from separate import mdx_should_use_onnxruntime
 from uvr_qt.state.app_state import (
     AdvancedModelControlsState,
     AppState,
@@ -73,6 +75,9 @@ class RuntimePathsTests(unittest.TestCase):
 
 
 class PersistenceTests(unittest.TestCase):
+    def test_default_settings_path_lives_under_data_dir(self) -> None:
+        self.assertEqual(DEFAULT_DATA_FILE, Path("data") / "config.yaml")
+
     def test_save_settings_writes_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             data_file = Path(tmp_dir) / "config.yaml"
@@ -597,7 +602,7 @@ class CliConfigCommandTests(unittest.TestCase):
         runner = CliRunner()
 
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["config", "show", "vr_model", "--json", "--data-file", "config.pkl"])
+            result = runner.invoke(cli, ["config", "show", "vr_model", "--json", "--config", "config.pkl"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(json.loads(result.output), {"vr_model": DEFAULT_DATA["vr_model"]})
@@ -997,6 +1002,8 @@ class AppStateConversionTests(unittest.TestCase):
                 demucs_stems="All Stems",
                 mdx_stems="All Stems",
                 secondary_models={"vr_voc_inst_secondary_model": "secondary"},
+                secondary_model_scales={"vr_voc_inst_secondary_model_scale": 0.75},
+                secondary_model_activations={"vr_is_secondary_model_activate": True},
             ),
             output=OutputSettingsState(
                 save_format="WAV",
@@ -1050,6 +1057,9 @@ class AppStateConversionTests(unittest.TestCase):
         self.assertTrue(request.options.use_gpu)
         self.assertEqual(request.advanced.window_size, 1024)
         self.assertEqual(request.advanced.compensate, "1.08")
+        self.assertEqual(request.models.secondary_models["vr_voc_inst_secondary_model"], "secondary")
+        self.assertEqual(request.models.secondary_model_scales["vr_voc_inst_secondary_model_scale"], 0.75)
+        self.assertTrue(request.models.secondary_model_activations["vr_is_secondary_model_activate"])
         self.assertEqual(request.extra_settings["custom"], "value")
 
     def test_app_state_round_trips_output_and_sampling_fields(self) -> None:
@@ -1126,6 +1136,9 @@ class AppStateConversionTests(unittest.TestCase):
                 "input_paths": ["track.wav"],
                 "export_path": "exports",
                 "vr_model": "vr model",
+                "vr_is_secondary_model_activate": True,
+                "vr_voc_inst_secondary_model": "secondary",
+                "vr_voc_inst_secondary_model_scale": 0.75,
                 "custom_flag": "present",
             }
         )
@@ -1136,6 +1149,9 @@ class AppStateConversionTests(unittest.TestCase):
         self.assertEqual(request.input_paths, ("track.wav",))
         self.assertEqual(request.export_path, "exports")
         self.assertEqual(request.models.vr_model, "vr model")
+        self.assertTrue(request.models.secondary_model_activations["vr_is_secondary_model_activate"])
+        self.assertEqual(request.models.secondary_models["vr_voc_inst_secondary_model"], "secondary")
+        self.assertEqual(request.models.secondary_model_scales["vr_voc_inst_secondary_model_scale"], 0.75)
         self.assertEqual(request.advanced.window_size, 512)
         self.assertEqual(request.extra_settings["custom_flag"], "present")
 
@@ -1149,6 +1165,129 @@ class EventTests(unittest.TestCase):
 
 
 class SeparationJobTests(unittest.TestCase):
+    def test_build_settings_preserves_requested_device(self) -> None:
+        job = SeparationJob()
+        request = SeparationRequest.from_settings(
+            AppSettings.from_legacy_dict(
+                {
+                    **DEFAULT_DATA,
+                    "device_set": "NVIDIA RTX:1",
+                    "is_gpu_conversion": True,
+                },
+                DEFAULT_DATA,
+            )
+        )
+
+        settings = job._build_settings("MDX-Net", request)
+
+        self.assertEqual(settings.device_set, "NVIDIA RTX:1")
+        self.assertTrue(settings.is_gpu_conversion)
+
+    def test_mdx_avoids_onnxruntime_cpu_fallback_when_cuda_device_is_active(self) -> None:
+        with mock.patch("separate.ort.get_available_providers", return_value=["CPUExecutionProvider"]):
+            should_use_ort = mdx_should_use_onnxruntime(
+                mdx_segment_size=256,
+                dim_t=256,
+                is_other_gpu=False,
+                device="cuda",
+                run_type=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            )
+
+        self.assertFalse(should_use_ort)
+
+    def test_mdx_avoids_onnxruntime_when_python_api_is_incomplete(self) -> None:
+        with mock.patch("separate.ort", object()):
+            should_use_ort = mdx_should_use_onnxruntime(
+                mdx_segment_size=256,
+                dim_t=256,
+                is_other_gpu=False,
+                device="cpu",
+                run_type=["CPUExecutionProvider"],
+            )
+
+        self.assertFalse(should_use_ort)
+
+    def test_mdx_uses_onnxruntime_when_cuda_provider_is_available(self) -> None:
+        with mock.patch("separate.ort.get_available_providers", return_value=["CUDAExecutionProvider"]):
+            should_use_ort = mdx_should_use_onnxruntime(
+                mdx_segment_size=256,
+                dim_t=256,
+                is_other_gpu=False,
+                device="cuda:1",
+                run_type=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            )
+
+        self.assertTrue(should_use_ort)
+
+    def test_determine_secondary_model_resolves_typed_request_slot(self) -> None:
+        job = SeparationJob()
+        request = SeparationRequest.from_settings(
+            AppSettings.from_legacy_dict(
+                {
+                    **DEFAULT_DATA,
+                    "vr_is_secondary_model_activate": True,
+                    "vr_voc_inst_secondary_model": f"VR Architecture{ENSEMBLE_PARTITION}Secondary Model",
+                    "vr_voc_inst_secondary_model_scale": 0.75,
+                },
+                DEFAULT_DATA,
+            )
+        )
+        built_model = SimpleNamespace(model_status=True, model_basename="secondary_model")
+
+        with mock.patch.object(
+            job,
+            "_available_models",
+            return_value=[ResolvedModel("VR Architecture", "Secondary Model", "vr")],
+        ), mock.patch.object(job, "_build_model", return_value=built_model) as build_model:
+            model, scale = job._determine_secondary_model(
+                request,
+                process_method="VR Arc",
+                primary_stem="Vocals",
+            )
+
+        self.assertIs(model, built_model)
+        self.assertEqual(scale, 0.75)
+        self.assertTrue(build_model.call_args.kwargs["is_secondary_model"])
+
+    def test_validate_request_rejects_demucs_pre_proc_for_vocal_target(self) -> None:
+        job = SeparationJob()
+        request = SeparationRequest.from_settings(
+            AppSettings.from_legacy_dict(
+                {
+                    **DEFAULT_DATA,
+                    "chosen_process_method": "Demucs",
+                    "demucs_stems": VOCAL_STEM,
+                    "is_demucs_pre_proc_model_activate": True,
+                    "demucs_pre_proc_model": f"VR Architecture{ENSEMBLE_PARTITION}Aux VR",
+                },
+                DEFAULT_DATA,
+            )
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Demucs pre-proc requires All Stems or a non-vocal Demucs stem target."):
+            job._validate_request(
+                request,
+                resolved_model=ResolvedModel("Demucs", "Demucs Model", "demucs"),
+                model=SimpleNamespace(demucs_stem_count=4, demucs_source_list=(VOCAL_STEM, "Bass")),
+            )
+
+    def test_available_stem_targets_uses_model_capabilities(self) -> None:
+        job = SeparationJob()
+        request = SeparationRequest.from_settings(AppSettings.from_legacy_dict(DEFAULT_DATA, DEFAULT_DATA))
+
+        with mock.patch.object(
+            job,
+            "resolve_model",
+            return_value=ResolvedModel("Demucs", "Demucs Model", "demucs"),
+        ), mock.patch.object(
+            job,
+            "_build_model",
+            return_value=SimpleNamespace(model_status=True, demucs_stem_count=2, demucs_source_list=(VOCAL_STEM, INST_STEM)),
+        ):
+            targets = job.available_stem_targets(request, "Demucs")
+
+        self.assertEqual(targets, (VOCAL_STEM, INST_STEM))
+
     def test_run_emits_expected_sanity_events(self) -> None:
         job = SeparationJob()
         events = []
@@ -1551,6 +1690,13 @@ class MainWindowTests(unittest.TestCase):
             def available_tagged_models_for_methods(self, process_methods):
                 return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
 
+            def available_stem_targets(self, state: AppState, process_method: str):
+                if process_method == "Demucs":
+                    return (ALL_STEMS, VOCAL_STEM, "Bass")
+                if process_method == "MDX-Net":
+                    return (ALL_STEMS, VOCAL_STEM, INST_STEM)
+                return (ALL_STEMS,)
+
             def resolve_model(self, state: AppState):
                 return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
 
@@ -1593,6 +1739,13 @@ class MainWindowTests(unittest.TestCase):
             def available_tagged_models_for_methods(self, process_methods):
                 return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
 
+            def available_stem_targets(self, state: AppState, process_method: str):
+                if process_method == "Demucs":
+                    return (ALL_STEMS, VOCAL_STEM, "Bass")
+                if process_method == "MDX-Net":
+                    return (ALL_STEMS, VOCAL_STEM, INST_STEM)
+                return (ALL_STEMS,)
+
             def resolve_model(self, state: AppState):
                 return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
 
@@ -1601,17 +1754,99 @@ class MainWindowTests(unittest.TestCase):
             try:
                 window.advanced_toggle_button.click()
                 window.process_method_combo.setCurrentText("Demucs")
-                window.demucs_stems_combo.setCurrentText("Vocals")
-                window.demucs_pre_proc_checkbox.setChecked(True)
                 window.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
+                window.demucs_pre_proc_checkbox.setChecked(True)
                 window.vocal_splitter_checkbox.setChecked(True)
                 window.vocal_splitter_model_combo.setCurrentText("MDX-Net: Aux MDX")
 
-                self.assertEqual(window.state.models.demucs_stems, "Vocals")
+                self.assertEqual(window.state.models.demucs_stems, ALL_STEMS)
                 self.assertEqual(window.state.models.demucs_pre_proc_model, "VR Architecture: Aux VR")
                 self.assertEqual(window.state.models.vocal_splitter_model, "MDX-Net: Aux MDX")
                 self.assertTrue(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
                 self.assertTrue(window.state.extra_settings["is_set_vocal_splitter"])
+            finally:
+                window.close()
+
+    def test_common_workflow_normalization_disables_demucs_pre_proc_for_vocal_target(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net", "Demucs")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def available_stem_targets(self, state: AppState, process_method: str):
+                if process_method == "Demucs":
+                    return (ALL_STEMS, VOCAL_STEM, "Bass")
+                return (ALL_STEMS, VOCAL_STEM, INST_STEM)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel(state.processing.process_method, state.models.demucs_model or "Model A", "demucs")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                window.advanced_toggle_button.click()
+                window.process_method_combo.setCurrentText("Demucs")
+                window.demucs_pre_proc_model_combo.setCurrentText("VR Architecture: Aux VR")
+                window.demucs_pre_proc_checkbox.setChecked(True)
+
+                self.assertTrue(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
+
+                window.demucs_stems_combo.setCurrentText(VOCAL_STEM)
+
+                self.assertEqual(window.state.models.demucs_stems, VOCAL_STEM)
+                self.assertFalse(window.state.extra_settings["is_demucs_pre_proc_model_activate"])
+                self.assertFalse(window.state.extra_settings["is_demucs_pre_proc_model_inst_mix"])
+            finally:
+                window.close()
+
+    def test_process_button_disables_when_vocal_splitter_has_no_model(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net", "Demucs")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def available_stem_targets(self, state: AppState, process_method: str):
+                return (ALL_STEMS, VOCAL_STEM, INST_STEM)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
+
+        state = self._make_state()
+        state = replace(
+            state,
+            models=replace(state.models, vocal_splitter_model=NO_MODEL),
+            extra_settings={**state.extra_settings, "is_set_vocal_splitter": True},
+        )
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=state, processing_facade=FakeFacade())
+            try:
+                self.assertFalse(window.process_button.isEnabled())
+                self.assertIn("Select an installed vocal splitter model", window.summary_label.text())
             finally:
                 window.close()
 

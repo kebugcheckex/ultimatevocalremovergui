@@ -108,7 +108,10 @@ Inspect and update persisted config:
 python -m uvr_cli config show
 python -m uvr_cli config show vr_model --json
 python -m uvr_cli config set is_gpu_conversion true
+python -m uvr_cli config show --config /path/to/config.yaml
 ```
+
+The default settings file is `data/config.yaml`. Commands that read persisted defaults also accept `--config` (alias: `--data-file`) to use a different YAML or pickle path.
 
 ## JSON Output
 

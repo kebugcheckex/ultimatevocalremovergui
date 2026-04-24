@@ -37,12 +37,14 @@ from gui_data.constants import (
     DEMUCS_OVERLAP,
     DEMUCS_SEGMENTS,
     FLAC,
+    INST_STEM,
     MDX_OVERLAP,
     MDX_SEGMENTS,
     MP3,
     MP3_BIT_RATES,
     NO_MODEL,
     STEM_SET_MENU,
+    VOCAL_STEM,
     VR_AGGRESSION,
     VR_WINDOW,
     WAV,
@@ -55,17 +57,33 @@ from uvr_qt.state import AppState
 from uvr_qt.ui.download_manager_window import DownloadManagerWindow
 
 
+SECONDARY_MODEL_SLOTS = (
+    ("voc_inst", "Vocals / Instrumental"),
+    ("other", "Other / No Other"),
+    ("bass", "Bass / No Bass"),
+    ("drums", "Drums / No Drums"),
+)
+
+
 class MainWindow(QMainWindow):
     """Basic Qt shell with input/output path selection."""
 
-    def __init__(self, state: AppState, processing_facade: ProcessingFacade | None = None):
+    def __init__(
+        self,
+        state: AppState,
+        processing_facade: ProcessingFacade | None = None,
+        config_path: str | Path | None = None,
+    ):
         super().__init__()
         self.state = state
+        self.config_path = config_path
         self.processing_facade: ProcessingFacade | None = processing_facade
         self.download_manager_window: DownloadManagerWindow | None = None
         self.processing_thread: QThread | None = None
         self.processing_worker: _ProcessingWorker | None = None
         self._is_syncing_processing_controls = False
+        self.secondary_model_combos: dict[str, QComboBox] = {}
+        self.secondary_scale_spinboxes: dict[str, QDoubleSpinBox] = {}
         self.setWindowTitle("Ultimate Vocal Remover")
         self.resize(920, 640)
 
@@ -464,10 +482,39 @@ class MainWindow(QMainWindow):
         composition_layout.addWidget(self.vocal_splitter_model_combo, 4, 1)
         composition_layout.addWidget(self.vocal_splitter_save_inst_checkbox, 5, 0, 1, 2)
 
+        self.secondary_models_group = QGroupBox("Secondary Models")
+        secondary_layout = QGridLayout(self.secondary_models_group)
+        secondary_layout.setHorizontalSpacing(12)
+        secondary_layout.setVerticalSpacing(8)
+        self.secondary_models_checkbox = QCheckBox("Enable secondary models for selected method", self.secondary_models_group)
+        self.secondary_models_checkbox.toggled.connect(self._on_secondary_models_enabled_changed)
+        secondary_layout.addWidget(self.secondary_models_checkbox, 0, 0, 1, 3)
+        secondary_layout.addWidget(QLabel("Stem"), 1, 0)
+        secondary_layout.addWidget(QLabel("Model"), 1, 1)
+        secondary_layout.addWidget(QLabel("Scale"), 1, 2)
+        for row_index, (slot, label) in enumerate(SECONDARY_MODEL_SLOTS, start=2):
+            combo = QComboBox(self.secondary_models_group)
+            combo.currentTextChanged.connect(
+                lambda value, slot=slot: self._on_secondary_model_changed(slot, value)
+            )
+            scale = QDoubleSpinBox(self.secondary_models_group)
+            scale.setRange(0.01, 0.99)
+            scale.setSingleStep(0.01)
+            scale.setDecimals(2)
+            scale.valueChanged.connect(
+                lambda value, slot=slot: self._on_secondary_model_scale_changed(slot, value)
+            )
+            self.secondary_model_combos[slot] = combo
+            self.secondary_scale_spinboxes[slot] = scale
+            secondary_layout.addWidget(QLabel(label), row_index, 0)
+            secondary_layout.addWidget(combo, row_index, 1)
+            secondary_layout.addWidget(scale, row_index, 2)
+
         advanced_layout.addWidget(self.vr_advanced_group)
         advanced_layout.addWidget(self.mdx_advanced_group)
         advanced_layout.addWidget(self.demucs_advanced_group)
         advanced_layout.addWidget(self.composition_group)
+        advanced_layout.addWidget(self.secondary_models_group)
         group_layout.addWidget(self.advanced_toggle_button)
         group_layout.addWidget(self.advanced_container)
         return group
@@ -514,7 +561,7 @@ class MainWindow(QMainWindow):
 
     def _persist_state(self) -> None:
         settings = AppSettings.from_legacy_dict(self.state.to_legacy_dict(), DEFAULT_DATA)
-        save_settings(settings=settings)
+        save_settings(settings=settings, data_file=self.config_path)
 
     def _refresh_view(self) -> None:
         input_paths = self.state.paths.input_paths
@@ -532,35 +579,40 @@ class MainWindow(QMainWindow):
                 f"Backend target: {resolved_model.process_method} / {resolved_model.model_name}"
             )
 
+        validation_issue = self._workflow_validation_issue()
         input_count = len(input_paths)
         input_hint = "No files selected" if input_count == 0 else f"{input_count} file(s) selected"
         output_hint = self.state.paths.export_path or "No output folder selected"
-        self.summary_label.setText(
-            "\n".join(
-                [
-                    f"Process method: {self.state.processing.process_method}",
-                    f"Selected model: {self._selected_model_name() or 'None'}",
-                    f"Save format: {self.state.output.save_format}",
-                    f"Wav type: {self.state.output.wav_type}",
-                    f"MP3 bitrate: {self.state.output.mp3_bitrate}",
-                    f"GPU preferred: {'Yes' if self.state.processing.use_gpu else 'No'}",
-                    f"Advanced controls: {'Expanded' if self.advanced_container.isVisible() else 'Collapsed'}",
-                    f"Normalize output: {'Yes' if self.state.processing.normalize_output else 'No'}",
-                    f"Input: {input_hint}",
-                    f"Output: {output_hint}",
-                ]
-            )
-        )
+        summary_lines = [
+            f"Process method: {self.state.processing.process_method}",
+            f"Selected model: {self._selected_model_name() or 'None'}",
+            f"Save format: {self.state.output.save_format}",
+            f"Wav type: {self.state.output.wav_type}",
+            f"MP3 bitrate: {self.state.output.mp3_bitrate}",
+            f"GPU preferred: {'Yes' if self.state.processing.use_gpu else 'No'}",
+            f"Advanced controls: {'Expanded' if self.advanced_container.isVisible() else 'Collapsed'}",
+            f"Normalize output: {'Yes' if self.state.processing.normalize_output else 'No'}",
+            f"Input: {input_hint}",
+            f"Output: {output_hint}",
+        ]
+        if validation_issue:
+            summary_lines.append(f"Validation: {validation_issue}")
+        self.summary_label.setText("\n".join(summary_lines))
         self.process_button.setEnabled(
             not self.state.runtime.is_processing
             and resolved_model is not None
             and bool(input_paths)
             and bool(self.state.paths.export_path)
+            and validation_issue is None
         )
         self.process_button.setText("Process with GPU" if self.state.processing.use_gpu else "Process on CPU")
         self.cancel_button.setEnabled(self.state.runtime.can_cancel)
         if self.state.runtime.status_text:
             self.status_label.setText(self.state.runtime.status_text)
+        elif validation_issue:
+            self.status_label.setText(validation_issue)
+        else:
+            self.status_label.setText("Idle")
         self.progress_bar.setValue(int(max(0.0, min(self.state.runtime.progress, 100.0))))
         self._sync_log_console()
 
@@ -671,6 +723,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_advanced_controls(self) -> None:
         aux_models = self._available_aux_models()
+        mdx_stems = self._available_stem_targets("MDX-Net", fallback=(ALL_STEMS, *STEM_SET_MENU))
+        demucs_stems = self._available_stem_targets("Demucs", fallback=(ALL_STEMS, *STEM_SET_MENU))
+        self._coerce_model_stem_selection("MDX-Net", mdx_stems)
+        self._coerce_model_stem_selection("Demucs", demucs_stems)
         self._is_syncing_processing_controls = True
         try:
             self.vr_aggression_combo.blockSignals(True)
@@ -706,6 +762,8 @@ class MainWindow(QMainWindow):
             self.vr_post_process_threshold_spinbox.blockSignals(False)
 
             self.mdx_stems_combo.blockSignals(True)
+            self.mdx_stems_combo.clear()
+            self.mdx_stems_combo.addItems(list(mdx_stems))
             self.mdx_stems_combo.setCurrentText(self.state.models.mdx_stems or ALL_STEMS)
             self.mdx_stems_combo.blockSignals(False)
 
@@ -730,6 +788,8 @@ class MainWindow(QMainWindow):
             self.mdx_compensate_field.blockSignals(False)
 
             self.demucs_stems_combo.blockSignals(True)
+            self.demucs_stems_combo.clear()
+            self.demucs_stems_combo.addItems(list(demucs_stems))
             self.demucs_stems_combo.setCurrentText(self.state.models.demucs_stems or ALL_STEMS)
             self.demucs_stems_combo.blockSignals(False)
 
@@ -780,6 +840,36 @@ class MainWindow(QMainWindow):
             self.vocal_splitter_save_inst_checkbox.blockSignals(True)
             self.vocal_splitter_save_inst_checkbox.setChecked(self._extra_flag("is_save_inst_set_vocal_splitter"))
             self.vocal_splitter_save_inst_checkbox.blockSignals(False)
+
+            activation_key = self._secondary_activation_key(self.state.processing.process_method)
+            is_secondary_enabled = bool(
+                activation_key
+                and self.state.models.secondary_model_activations.get(activation_key, False)
+            )
+            self.secondary_models_checkbox.blockSignals(True)
+            self.secondary_models_checkbox.setChecked(is_secondary_enabled)
+            self.secondary_models_checkbox.blockSignals(False)
+
+            for slot, _label in SECONDARY_MODEL_SLOTS:
+                model_key = self._secondary_model_key(slot)
+                scale_key = f"{model_key}_scale" if model_key else ""
+                combo = self.secondary_model_combos[slot]
+                scale = self.secondary_scale_spinboxes[slot]
+
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItems(list(aux_models))
+                if model_key:
+                    combo.setCurrentText(
+                        self.state.models.secondary_models.get(model_key, NO_MODEL)
+                        if self.state.models.secondary_models.get(model_key, NO_MODEL) in aux_models
+                        else NO_MODEL
+                    )
+                combo.blockSignals(False)
+
+                scale.blockSignals(True)
+                scale.setValue(float(self.state.models.secondary_model_scales.get(scale_key, DEFAULT_DATA.get(scale_key, 0.5))))
+                scale.blockSignals(False)
         finally:
             self._is_syncing_processing_controls = False
 
@@ -788,10 +878,15 @@ class MainWindow(QMainWindow):
         self.mdx_advanced_group.setVisible(process_method == "MDX-Net")
         self.demucs_advanced_group.setVisible(process_method == "Demucs")
         self.composition_group.setVisible(process_method in {"VR Architecture", "MDX-Net", "Demucs"})
+        self.secondary_models_group.setVisible(process_method in {"VR Architecture", "MDX-Net", "Demucs"})
         self.demucs_pre_proc_model_combo.setEnabled(self.demucs_pre_proc_checkbox.isChecked())
         self.demucs_pre_proc_inst_mix_checkbox.setEnabled(self.demucs_pre_proc_checkbox.isChecked())
         self.vocal_splitter_model_combo.setEnabled(self.vocal_splitter_checkbox.isChecked())
         self.vocal_splitter_save_inst_checkbox.setEnabled(self.vocal_splitter_checkbox.isChecked())
+        for combo in self.secondary_model_combos.values():
+            combo.setEnabled(self.secondary_models_checkbox.isChecked())
+        for scale in self.secondary_scale_spinboxes.values():
+            scale.setEnabled(self.secondary_models_checkbox.isChecked())
 
     def _on_process_method_changed(self, process_method: str) -> None:
         if self._is_syncing_processing_controls or not process_method:
@@ -806,6 +901,7 @@ class MainWindow(QMainWindow):
             self._state_with_selected_model(process_method, selected_model),
             processing=replace(self.state.processing, process_method=process_method),
         )
+        self._normalize_common_workflow_state()
         self._persist_state()
         self._refresh_view()
 
@@ -938,6 +1034,28 @@ class MainWindow(QMainWindow):
         self._persist_state()
         self._refresh_view()
 
+    def _update_secondary_model_maps(
+        self,
+        *,
+        models: dict[str, str] | None = None,
+        scales: dict[str, float] | None = None,
+        activations: dict[str, bool] | None = None,
+    ) -> None:
+        current_models = dict(self.state.models.secondary_models)
+        current_scales = dict(self.state.models.secondary_model_scales)
+        current_activations = dict(self.state.models.secondary_model_activations)
+        if models:
+            current_models.update(models)
+        if scales:
+            current_scales.update(scales)
+        if activations:
+            current_activations.update(activations)
+        self._update_models(
+            secondary_models=current_models,
+            secondary_model_scales=current_scales,
+            secondary_model_activations=current_activations,
+        )
+
     def _update_extra_settings(self, **changes: object) -> None:
         updated = dict(self.state.extra_settings)
         updated.update(changes)
@@ -951,6 +1069,87 @@ class MainWindow(QMainWindow):
     def _available_aux_models(self) -> tuple[str, ...]:
         models = self._get_processing_facade().available_tagged_models_for_methods(("VR Architecture", "MDX-Net"))
         return (NO_MODEL, *models)
+
+    def _available_stem_targets(self, process_method: str, *, fallback: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            targets = self._get_processing_facade().available_stem_targets(self.state, process_method)
+        except Exception:
+            targets = ()
+        return targets or fallback
+
+    def _coerce_model_stem_selection(self, process_method: str, available_targets: tuple[str, ...]) -> None:
+        if process_method == "MDX-Net":
+            current_value = self.state.models.mdx_stems
+            field_name = "mdx_stems"
+        elif process_method == "Demucs":
+            current_value = self.state.models.demucs_stems
+            field_name = "demucs_stems"
+        else:
+            return
+
+        if not available_targets or current_value in available_targets:
+            return
+        self.state = replace(self.state, models=replace(self.state.models, **{field_name: available_targets[0]}))
+        self._normalize_common_workflow_state()
+        self._persist_state()
+
+    def _normalize_common_workflow_state(self) -> None:
+        extra_settings = dict(self.state.extra_settings)
+        process_method = self.state.processing.process_method
+        demucs_stem = self.state.models.demucs_stems
+
+        if process_method != "Demucs":
+            extra_settings["is_demucs_pre_proc_model_activate"] = False
+            extra_settings["is_demucs_pre_proc_model_inst_mix"] = False
+
+        if demucs_stem in {VOCAL_STEM, INST_STEM}:
+            extra_settings["is_demucs_pre_proc_model_activate"] = False
+            extra_settings["is_demucs_pre_proc_model_inst_mix"] = False
+
+        if not extra_settings.get("is_set_vocal_splitter", False):
+            extra_settings["is_save_inst_set_vocal_splitter"] = False
+
+        # TODO: When combine-stems and saved workflow profiles move into Qt, normalize those
+        # cross-field interactions here instead of relying on legacy Tk menus.
+        self.state = replace(self.state, extra_settings=extra_settings)
+
+    def _workflow_validation_issue(self) -> str | None:
+        if self._extra_flag("is_demucs_pre_proc_model_activate"):
+            if self.state.processing.process_method != "Demucs":
+                return "Demucs pre-proc is only available for Demucs workflows."
+            if self.state.models.demucs_stems in {VOCAL_STEM, INST_STEM}:
+                return "Demucs pre-proc requires All Stems or a non-vocal Demucs stem target."
+            if self.state.models.demucs_pre_proc_model == NO_MODEL:
+                return "Select an installed pre-proc model before starting."
+
+        if self._extra_flag("is_demucs_pre_proc_model_inst_mix") and not self._extra_flag("is_demucs_pre_proc_model_activate"):
+            return "Save Instrumental Mixture requires Demucs pre-proc to be enabled."
+
+        if self._extra_flag("is_set_vocal_splitter") and self.state.models.vocal_splitter_model == NO_MODEL:
+            return "Select an installed vocal splitter model before starting."
+
+        if self._extra_flag("is_save_inst_set_vocal_splitter") and not self._extra_flag("is_set_vocal_splitter"):
+            return "Save Split Instrumentals requires the vocal splitter workflow to be enabled."
+
+        return None
+
+    def _secondary_prefix(self, process_method: str | None = None) -> str | None:
+        method = process_method or self.state.processing.process_method
+        if method == "VR Architecture":
+            return "vr"
+        if method == "MDX-Net":
+            return "mdx"
+        if method == "Demucs":
+            return "demucs"
+        return None
+
+    def _secondary_activation_key(self, process_method: str | None = None) -> str | None:
+        prefix = self._secondary_prefix(process_method)
+        return f"{prefix}_is_secondary_model_activate" if prefix else None
+
+    def _secondary_model_key(self, slot: str, process_method: str | None = None) -> str | None:
+        prefix = self._secondary_prefix(process_method)
+        return f"{prefix}_{slot}_secondary_model" if prefix else None
 
     def _on_vr_aggression_changed(self, value: str) -> None:
         if self._is_syncing_processing_controls or not value:
@@ -1031,7 +1230,10 @@ class MainWindow(QMainWindow):
     def _on_demucs_stems_changed(self, value: str) -> None:
         if self._is_syncing_processing_controls or not value:
             return
-        self._update_models(demucs_stems=value)
+        self.state = replace(self.state, models=replace(self.state.models, demucs_stems=value))
+        self._normalize_common_workflow_state()
+        self._persist_state()
+        self._refresh_view()
 
     def _on_demucs_overlap_changed(self, value: str) -> None:
         if self._is_syncing_processing_controls or not value:
@@ -1051,7 +1253,14 @@ class MainWindow(QMainWindow):
     def _on_demucs_pre_proc_enabled_changed(self, checked: bool) -> None:
         if self._is_syncing_processing_controls:
             return
-        self._update_extra_settings(is_demucs_pre_proc_model_activate=checked)
+        updated = dict(self.state.extra_settings)
+        updated["is_demucs_pre_proc_model_activate"] = checked
+        if not checked:
+            updated["is_demucs_pre_proc_model_inst_mix"] = False
+        self.state = replace(self.state, extra_settings=updated)
+        self._normalize_common_workflow_state()
+        self._persist_state()
+        self._refresh_view()
 
     def _on_demucs_pre_proc_model_changed(self, value: str) -> None:
         if self._is_syncing_processing_controls or not value:
@@ -1066,7 +1275,13 @@ class MainWindow(QMainWindow):
     def _on_vocal_splitter_enabled_changed(self, checked: bool) -> None:
         if self._is_syncing_processing_controls:
             return
-        self._update_extra_settings(is_set_vocal_splitter=checked)
+        updated = dict(self.state.extra_settings)
+        updated["is_set_vocal_splitter"] = checked
+        if not checked:
+            updated["is_save_inst_set_vocal_splitter"] = False
+        self.state = replace(self.state, extra_settings=updated)
+        self._persist_state()
+        self._refresh_view()
 
     def _on_vocal_splitter_model_changed(self, value: str) -> None:
         if self._is_syncing_processing_controls or not value:
@@ -1077,6 +1292,27 @@ class MainWindow(QMainWindow):
         if self._is_syncing_processing_controls:
             return
         self._update_extra_settings(is_save_inst_set_vocal_splitter=checked)
+
+    def _on_secondary_models_enabled_changed(self, checked: bool) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        activation_key = self._secondary_activation_key()
+        if activation_key:
+            self._update_secondary_model_maps(activations={activation_key: checked})
+
+    def _on_secondary_model_changed(self, slot: str, value: str) -> None:
+        if self._is_syncing_processing_controls or not value:
+            return
+        model_key = self._secondary_model_key(slot)
+        if model_key:
+            self._update_secondary_model_maps(models={model_key: value})
+
+    def _on_secondary_model_scale_changed(self, slot: str, value: float) -> None:
+        if self._is_syncing_processing_controls:
+            return
+        model_key = self._secondary_model_key(slot)
+        if model_key:
+            self._update_secondary_model_maps(scales={f"{model_key}_scale": float(value)})
 
     def _selected_model_name(self) -> str:
         return self._selected_model_name_for_method(self.state.processing.process_method)
@@ -1175,6 +1411,7 @@ class MainWindow(QMainWindow):
         self._set_runtime(
             is_processing=False,
             can_cancel=False,
+            progress=0.0,
             status_text="Cancelled",
         )
 

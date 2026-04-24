@@ -27,6 +27,9 @@ class ProcessingFacade:
     def available_tagged_models_for_methods(self, process_methods: tuple[str, ...]) -> tuple[str, ...]:
         return self.job.available_tagged_models_for_methods(process_methods)
 
+    def available_stem_targets(self, state: AppState, process_method: str) -> tuple[str, ...]:
+        return self.job.available_stem_targets(state.to_separation_request(), process_method)
+
     def resolve_model(self, state: AppState) -> ResolvedModel | None:
         return self.job.resolve_model(state.to_separation_request())
 

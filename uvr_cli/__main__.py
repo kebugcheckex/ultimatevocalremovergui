@@ -2,7 +2,7 @@
 
 Thin wrapper around :class:`uvr_core.jobs.SeparationJob` and
 :class:`uvr_core.jobs.DownloadJob`. Builds framework-neutral requests from CLI
-flags (seeded with persisted defaults when ``config.yaml`` is present) and runs
+flags (seeded with persisted defaults when ``data/config.yaml`` is present) and runs
 backend jobs without importing UI adapters.
 """
 
@@ -38,7 +38,7 @@ from gui_data.constants import (
     WAV,
 )
 from uvr.config.models import AppSettings
-from uvr.config.persistence import load_settings, save_settings
+from uvr.config.persistence import DEFAULT_DATA_FILE, load_settings, save_settings
 from uvr_core.events import AudioToolResultEvent, DownloadResultEvent, EnsembleResultEvent, LogEvent, ProgressEvent, ResultEvent, StatusEvent
 from uvr_core.jobs import AudioToolJob, DownloadJob, EnsembleJob, SeparationJob
 from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
@@ -148,7 +148,7 @@ def _make_progress_reporter():
     return report
 
 
-def _load_defaults(data_file: str) -> SeparationRequest:
+def _load_defaults(data_file: str | Path | None) -> SeparationRequest:
     try:
         settings = load_settings(default_data=DEFAULT_DATA, data_file=data_file)
     except Exception:
@@ -156,7 +156,7 @@ def _load_defaults(data_file: str) -> SeparationRequest:
     return SeparationRequest.from_settings(settings)
 
 
-def _load_app_settings(data_file: str) -> AppSettings:
+def _load_app_settings(data_file: str | Path | None) -> AppSettings:
     try:
         return load_settings(default_data=DEFAULT_DATA, data_file=data_file)
     except Exception:
@@ -322,8 +322,10 @@ def config_group() -> None:
 @config_group.command("show")
 @click.argument("key", required=False)
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file to read.",
@@ -358,8 +360,10 @@ def config_show(key: str | None, data_file: str, as_json: bool) -> None:
 @click.argument("key")
 @click.argument("value")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file to update.",
@@ -733,8 +737,10 @@ def audio_tool_group() -> None:
 )
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -806,8 +812,10 @@ def audio_tool_time_stretch(
 )
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -883,8 +891,10 @@ def audio_tool_pitch(
 )
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -965,8 +975,10 @@ def audio_tool_align(
 )
 @click.option("--normalize/--no-normalize", default=None, help="Normalize output loudness.")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",
@@ -1054,8 +1066,10 @@ def audio_tool_match(
 @click.option("--add-model-name/--no-add-model-name", default=None, help="Append model name to filenames.")
 @click.option("--model-folder/--no-model-folder", "create_model_folder", default=None, help="Group outputs in per-model subdirectories.")
 @click.option(
+    "--config",
     "--data-file",
-    default="config.yaml",
+    "data_file",
+    default=str(DEFAULT_DATA_FILE),
     show_default=True,
     type=click.Path(dir_okay=False),
     help="Persisted settings file used for defaults. Missing files are ignored.",

@@ -22,7 +22,7 @@ Repository findings from this codebase review:
   - newer modules under `uvr/`, `uvr_core/`, and `uvr_qt/` use `X | Y`
   - legacy and vendored code under `UVR.py`, `demucs/`, and `lib_v5/` still uses `typing.List`, `Optional`, `Union`, and `typing as tp`
 - Persistence is partially modernized:
-  - default config path is now YAML-backed `config.yaml`
+  - default config path is now YAML-backed `data/config.yaml`
   - legacy pickle compatibility still exists through `data.pkl`
 - Runtime bootstrapping still depends on legacy global behavior:
   - `UVR.py` calls `os.chdir(BASE_PATH)`

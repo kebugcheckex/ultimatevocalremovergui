@@ -19,18 +19,27 @@ from gui_data.constants import (
     DEMUCS_ARCH_TYPE,
     DEMUCS_OVERLAP,
     DEF_OPT,
+    BASS_STEM,
     INTRO_MAPPER,
     ENSEMBLE_PARTITION,
+    DRUM_STEM,
+    INST_STEM,
     MATCH_INPUTS,
     MDX_OVERLAP,
     MDX23_OVERLAP,
     MDX_ARCH_TYPE,
+    NO_BASS_STEM,
     NO_CODE,
+    NO_DRUM_STEM,
     PHASE_SHIFTS_OPT,
     PITCH_TEXT,
+    NO_MODEL,
+    NO_OTHER_STEM,
+    OTHER_STEM,
     TIME_TEXT,
     TIME_STRETCH,
     TIME_WINDOW_MAPPER,
+    VOCAL_STEM,
     VOLUME_MAPPER,
     VR_ARCH_PM,
     VR_ARCH_TYPE,
@@ -154,6 +163,39 @@ class SeparationJob:
             if model.process_method in process_methods
         )
 
+    def available_stem_targets(self, request: SeparationRequest, process_method: str) -> tuple[str, ...]:
+        scoped_request = SeparationRequest(
+            input_paths=request.input_paths,
+            export_path=request.export_path,
+            models=request.models,
+            output=request.output,
+            options=request.options.__class__(**{**request.options.__dict__, "process_method": process_method}),
+            advanced=request.advanced,
+            extra_settings=request.extra_settings,
+        )
+        resolved_model = self.resolve_model(scoped_request)
+        if resolved_model is None:
+            return (ALL_STEMS,)
+
+        model = self._build_model(resolved_model, scoped_request)
+        if not model.model_status:
+            return (ALL_STEMS,)
+
+        if resolved_model.process_method == DEMUCS_ARCH_TYPE:
+            if model.demucs_stem_count >= 3:
+                return (ALL_STEMS, *tuple(model.demucs_source_list))
+            return tuple(model.demucs_source_list)
+
+        if resolved_model.process_method == MDX_ARCH_TYPE:
+            if model.mdx_model_stems:
+                if len(model.mdx_model_stems) > 1:
+                    return (ALL_STEMS, *tuple(model.mdx_model_stems))
+                return tuple(model.mdx_model_stems)
+            stems = tuple(dict.fromkeys(stem for stem in (ALL_STEMS, model.primary_stem, model.secondary_stem) if stem))
+            return stems or (ALL_STEMS,)
+
+        return (ALL_STEMS,)
+
     def resolve_model(self, request: SeparationRequest) -> ResolvedModel | None:
         available = self._available_models()
         preferred_method = request.options.process_method
@@ -202,11 +244,12 @@ class SeparationJob:
         if not export_path:
             raise RuntimeError("No output folder selected.")
 
-        os.makedirs(export_path, exist_ok=True)
-
         model = self._build_model(resolved_model, request)
         if not model.model_status:
             raise RuntimeError(f'The selected backend model "{resolved_model.model_name}" is not available.')
+
+        self._validate_request(request, resolved_model=resolved_model, model=model)
+        os.makedirs(export_path, exist_ok=True)
 
         cache = SourceCache()
         processed: list[str] = []
@@ -354,7 +397,7 @@ class SeparationJob:
         advanced = request.advanced
         extra_settings = request.extra_settings
         return ModelDataSettings(
-            device_set=DEFAULT,
+            device_set=processing_settings.device or DEFAULT,
             is_deverb_vocals=False,
             deverb_vocal_opt="Vocals",
             is_denoise_model=False,
@@ -384,7 +427,7 @@ class SeparationJob:
             chosen_process_method=VR_ARCH_TYPE if process_method == VR_ARCH_PM else process_method,
             is_save_inst_set_vocal_splitter=bool(extra_settings.get("is_save_inst_set_vocal_splitter", False)),
             ensemble_main_stem="",
-            vr_is_secondary_model_activate=False,
+            vr_is_secondary_model_activate=self._secondary_enabled(request, VR_ARCH_TYPE),
             aggression_setting=advanced.aggression_setting,
             is_tta=advanced.is_tta,
             is_post_process=advanced.is_post_process,
@@ -394,12 +437,12 @@ class SeparationJob:
             is_high_end_process=advanced.is_high_end_process,
             post_process_threshold=advanced.post_process_threshold,
             vr_hash_mapper=self.catalog.vr_hash_mapper,
-            mdx_is_secondary_model_activate=False,
+            mdx_is_secondary_model_activate=self._secondary_enabled(request, MDX_ARCH_TYPE),
             margin=advanced.margin,
             mdx_segment_size=advanced.mdx_segment_size,
             mdx_hash_mapper=self.catalog.mdx_hash_mapper,
             compensate=advanced.compensate or AUTO_SELECT,
-            demucs_is_secondary_model_activate=False,
+            demucs_is_secondary_model_activate=self._secondary_enabled(request, DEMUCS_ARCH_TYPE),
             is_demucs_pre_proc_model_activate=bool(extra_settings.get("is_demucs_pre_proc_model_activate", False)),
             is_demucs_pre_proc_model_inst_mix=bool(extra_settings.get("is_demucs_pre_proc_model_inst_mix", False)),
             margin_demucs=advanced.margin_demucs,
@@ -422,7 +465,13 @@ class SeparationJob:
         return ModelDataResolvers(
             return_ensemble_stems=lambda: ("", ""),
             check_only_selection_stem=lambda _check_type: False,
-            determine_secondary_model=lambda *_args: (None, None),
+            determine_secondary_model=lambda process_method, primary_stem, primary_only, secondary_only: self._determine_secondary_model(
+                request,
+                process_method=process_method,
+                primary_stem=primary_stem,
+                is_primary_stem_only=primary_only,
+                is_secondary_stem_only=secondary_only,
+            ),
             determine_demucs_pre_proc_model=lambda primary_stem=None: self._determine_demucs_pre_proc_model(
                 request,
                 primary_stem=primary_stem,
@@ -435,10 +484,163 @@ class SeparationJob:
         process_method, separator, model_name = tagged_name.partition(ENSEMBLE_PARTITION)
         if not separator or not model_name:
             return None
+        return self._resolve_model_by_method_and_name(process_method, model_name)
+
+    def _resolve_model_by_method_and_name(self, process_method: str, model_name: str) -> ResolvedModel | None:
         for candidate in self._available_models():
             if candidate.process_method == process_method and candidate.model_name == model_name:
                 return candidate
         return None
+
+    def _resolve_model_reference(self, model_reference: str) -> ResolvedModel | None:
+        if not model_reference or model_reference == NO_MODEL:
+            return None
+
+        tagged_model = self._resolve_tagged_model(model_reference)
+        if tagged_model is not None:
+            return tagged_model
+
+        for candidate in self._available_models():
+            if candidate.model_name == model_reference:
+                return candidate
+        return None
+
+    def _secondary_enabled(self, request: SeparationRequest, process_method: str) -> bool:
+        activation_key = {
+            VR_ARCH_TYPE: "vr_is_secondary_model_activate",
+            VR_ARCH_PM: "vr_is_secondary_model_activate",
+            MDX_ARCH_TYPE: "mdx_is_secondary_model_activate",
+            DEMUCS_ARCH_TYPE: "demucs_is_secondary_model_activate",
+        }.get(process_method)
+        activations = getattr(request.models, "secondary_model_activations", {})
+        return bool(activation_key and activations.get(activation_key, False))
+
+    def _secondary_slot_key(self, process_method: str, primary_stem: str) -> str | None:
+        prefix = {
+            VR_ARCH_TYPE: "vr",
+            VR_ARCH_PM: "vr",
+            MDX_ARCH_TYPE: "mdx",
+            DEMUCS_ARCH_TYPE: "demucs",
+        }.get(process_method)
+        if prefix is None:
+            return None
+
+        if primary_stem in (VOCAL_STEM, INST_STEM):
+            stem_key = "voc_inst"
+        elif primary_stem in (OTHER_STEM, NO_OTHER_STEM):
+            stem_key = "other"
+        elif primary_stem in (DRUM_STEM, NO_DRUM_STEM):
+            stem_key = "drums"
+        elif primary_stem in (BASS_STEM, NO_BASS_STEM):
+            stem_key = "bass"
+        else:
+            return None
+        return f"{prefix}_{stem_key}_secondary_model"
+
+    def _determine_secondary_model(
+        self,
+        request: SeparationRequest,
+        *,
+        process_method: str,
+        primary_stem: str,
+        is_primary_stem_only: bool = False,
+        is_secondary_stem_only: bool = False,
+    ) -> tuple[ModelData | None, float | None]:
+        if not self._secondary_enabled(request, process_method):
+            return None, None
+
+        model_key = self._secondary_slot_key(process_method, primary_stem)
+        if model_key is None:
+            return None, None
+
+        secondary_models = getattr(request.models, "secondary_models", {})
+        model_reference = secondary_models.get(model_key, NO_MODEL)
+        resolved_model = self._resolve_model_reference(model_reference)
+        if resolved_model is None:
+            return None, None
+
+        scale_key = f"{model_key}_scale"
+        secondary_scales = getattr(request.models, "secondary_model_scales", {})
+        scale = float(secondary_scales.get(scale_key, 0.5))
+        model = self._build_model(
+            resolved_model,
+            request,
+            is_secondary_model=True,
+            primary_model_primary_stem=primary_stem,
+            is_primary_model_primary_stem_only=is_primary_stem_only,
+            is_primary_model_secondary_stem_only=is_secondary_stem_only,
+        )
+        if not model.model_status:
+            return None, None
+        return model, scale
+
+    def _validate_request(
+        self,
+        request: SeparationRequest,
+        *,
+        resolved_model: ResolvedModel | None = None,
+        model: ModelData | None = None,
+    ) -> None:
+        if request.options.primary_stem_only and request.options.secondary_stem_only:
+            raise RuntimeError("Primary stem only and secondary stem only cannot both be enabled.")
+
+        process_method = resolved_model.process_method if resolved_model is not None else request.options.process_method
+        secondary_scales = getattr(request.models, "secondary_model_scales", {})
+        secondary_models = getattr(request.models, "secondary_models", {})
+        for scale_key, raw_scale in secondary_scales.items():
+            scale = float(raw_scale)
+            if scale < 0.01 or scale > 0.99:
+                raise RuntimeError(f"{scale_key} must be between 0.01 and 0.99.")
+
+        for process_method in (VR_ARCH_TYPE, MDX_ARCH_TYPE, DEMUCS_ARCH_TYPE):
+            if not self._secondary_enabled(request, process_method):
+                continue
+            prefix = "vr" if process_method == VR_ARCH_TYPE else process_method.lower().split("-")[0]
+            for stem_key in ("voc_inst", "other", "bass", "drums"):
+                model_key = f"{prefix}_{stem_key}_secondary_model"
+                model_reference = secondary_models.get(model_key, NO_MODEL)
+                if model_reference == NO_MODEL:
+                    continue
+                if self._resolve_model_reference(model_reference) is None:
+                    raise RuntimeError(f'Secondary model "{model_reference}" is not installed.')
+
+        if bool(request.extra_settings.get("is_demucs_pre_proc_model_activate", False)):
+            if process_method != DEMUCS_ARCH_TYPE:
+                raise RuntimeError("Demucs pre-proc is only available for Demucs workflows.")
+            if request.models.demucs_stems in {VOCAL_STEM, INST_STEM}:
+                raise RuntimeError("Demucs pre-proc requires All Stems or a non-vocal Demucs stem target.")
+            if not self._resolve_model_reference(request.models.demucs_pre_proc_model):
+                raise RuntimeError("Demucs pre-proc is enabled, but no installed pre-proc model is selected.")
+            if model is not None and getattr(model, "demucs_stem_count", 0) < 3:
+                raise RuntimeError("Demucs pre-proc is only supported for Demucs models with at least three stems.")
+
+        if bool(request.extra_settings.get("is_demucs_pre_proc_model_inst_mix", False)) and not bool(
+            request.extra_settings.get("is_demucs_pre_proc_model_activate", False)
+        ):
+            raise RuntimeError("Save Instrumental Mixture requires Demucs pre-proc to be enabled.")
+
+        if bool(request.extra_settings.get("is_set_vocal_splitter", False)):
+            if not self._resolve_model_reference(request.models.vocal_splitter_model):
+                raise RuntimeError("Vocal splitter is enabled, but no installed vocal splitter model is selected.")
+        elif bool(request.extra_settings.get("is_save_inst_set_vocal_splitter", False)):
+            raise RuntimeError("Save Split Instrumentals requires the vocal splitter workflow to be enabled.")
+
+        if process_method == DEMUCS_ARCH_TYPE and model is not None:
+            valid_stems = set(getattr(model, "demucs_source_list", ()))
+            if request.models.demucs_stems != ALL_STEMS and request.models.demucs_stems not in valid_stems:
+                raise RuntimeError(
+                    f'Demucs stem target "{request.models.demucs_stems}" is not supported by the selected model.'
+                )
+
+        if process_method == MDX_ARCH_TYPE and model is not None and getattr(model, "mdx_model_stems", None):
+            valid_stems = set(model.mdx_model_stems)
+            if request.models.mdx_stems != ALL_STEMS and request.models.mdx_stems not in valid_stems:
+                raise RuntimeError(
+                    f'MDX stem target "{request.models.mdx_stems}" is not supported by the selected model.'
+                )
+
+        # TODO: Ensemble-era combine-stems and popup-only composition permutations still live outside
+        # the Phase 4 Qt surface. Add explicit validation here when those workflows are promoted.
 
     def _determine_demucs_pre_proc_model(
         self,
@@ -448,7 +650,7 @@ class SeparationJob:
     ) -> ModelData | None:
         if not bool(request.extra_settings.get("is_demucs_pre_proc_model_activate", False)):
             return None
-        resolved_model = self._resolve_tagged_model(request.models.demucs_pre_proc_model)
+        resolved_model = self._resolve_model_reference(request.models.demucs_pre_proc_model)
         if resolved_model is None:
             return None
         model = self._build_model(
@@ -462,7 +664,7 @@ class SeparationJob:
     def _determine_vocal_split_model(self, request: SeparationRequest) -> ModelData | None:
         if not bool(request.extra_settings.get("is_set_vocal_splitter", False)):
             return None
-        resolved_model = self._resolve_tagged_model(request.models.vocal_splitter_model)
+        resolved_model = self._resolve_model_reference(request.models.vocal_splitter_model)
         if resolved_model is None:
             return None
         model = self._build_model(
