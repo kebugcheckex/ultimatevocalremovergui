@@ -154,6 +154,7 @@ Phase 4 exit status:
 Current progress:
 
 - the download manager piece has started: Qt now has a separate window for catalog refresh and model downloads on top of `uvr_core.jobs.DownloadJob`
+- the help/about/error-dialog slice has started: the Qt main window now exposes quick-start/about actions and a reusable detailed error dialog for failed processing runs
 
 **Exit:** Tk `UVR.py` is no longer needed for any supported workflow.
 

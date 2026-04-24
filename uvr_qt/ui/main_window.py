@@ -2,70 +2,30 @@
 
 from __future__ import annotations
 
-import traceback
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
-from PySide6.QtWidgets import (
-    QComboBox,
-    QCheckBox,
-    QFileDialog,
-    QDoubleSpinBox,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QPushButton,
-    QPlainTextEdit,
-    QProgressBar,
-    QToolButton,
-    QSpinBox,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import QThread, Qt
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFileDialog, QInputDialog, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
-from gui_data.constants import (
-    AUTO_SELECT,
-    ALL_STEMS,
-    BATCH_SIZE,
-    DEFAULT_DATA,
-    DEF_OPT,
-    DEMUCS_OVERLAP,
-    DEMUCS_SEGMENTS,
-    FLAC,
-    INST_STEM,
-    MDX_OVERLAP,
-    MDX_SEGMENTS,
-    MP3,
-    MP3_BIT_RATES,
-    NO_MODEL,
-    STEM_SET_MENU,
-    VOCAL_STEM,
-    VR_AGGRESSION,
-    VR_WINDOW,
-    WAV,
-    WAV_TYPE,
-)
+from gui_data.constants import AUTO_SELECT, ALL_STEMS, DEFAULT_DATA, DEF_OPT, INST_STEM, MP3, NO_MODEL, STEM_SET_MENU, VOCAL_STEM
 from uvr.config.models import AppSettings
 from uvr.config.persistence import save_settings
-from uvr_qt.services import JobCancelledError, ProcessResult, ProcessingFacade
+from uvr.config.profiles import SettingsProfileStore
+from uvr_qt.services import ProcessResult, ProcessingFacade
 from uvr_qt.state import AppState
 from uvr_qt.ui.download_manager_window import DownloadManagerWindow
-
-
-SECONDARY_MODEL_SLOTS = (
-    ("voc_inst", "Vocals / Instrumental"),
-    ("other", "Other / No Other"),
-    ("bass", "Bass / No Bass"),
-    ("drums", "Drums / No Drums"),
+from uvr_qt.ui.main_window_builders import (
+    SECONDARY_MODEL_SLOTS,
+    build_header,
+    build_paths_group,
+    build_process_group,
+    build_summary_group,
 )
+from uvr_qt.ui.main_window_support import MainWindowDialogMixin, MainWindowProfileMixin, ProcessingWorker
 
 
-class MainWindow(QMainWindow):
+class MainWindow(MainWindowDialogMixin, MainWindowProfileMixin, QMainWindow):
     """Basic Qt shell with input/output path selection."""
 
     def __init__(
@@ -73,451 +33,37 @@ class MainWindow(QMainWindow):
         state: AppState,
         processing_facade: ProcessingFacade | None = None,
         config_path: str | Path | None = None,
+        profile_store: SettingsProfileStore | None = None,
     ):
         super().__init__()
         self.state = state
         self.config_path = config_path
         self.processing_facade: ProcessingFacade | None = processing_facade
+        self.profile_store = profile_store or SettingsProfileStore(default_data=DEFAULT_DATA)
         self.download_manager_window: DownloadManagerWindow | None = None
         self.processing_thread: QThread | None = None
-        self.processing_worker: _ProcessingWorker | None = None
+        self.processing_worker: ProcessingWorker | None = None
         self._is_syncing_processing_controls = False
         self.secondary_model_combos: dict[str, QComboBox] = {}
         self.secondary_scale_spinboxes: dict[str, QDoubleSpinBox] = {}
         self.setWindowTitle("Ultimate Vocal Remover")
         self.resize(920, 640)
+        self._build_menu_bar()
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
         root_layout.setContentsMargins(24, 24, 24, 24)
         root_layout.setSpacing(16)
 
-        root_layout.addWidget(self._build_header())
-        root_layout.addWidget(self._build_paths_group())
-        root_layout.addWidget(self._build_process_group())
-        root_layout.addWidget(self._build_summary_group())
+        root_layout.addWidget(build_header(self))
+        root_layout.addWidget(build_paths_group(self))
+        root_layout.addWidget(build_process_group(self))
+        root_layout.addWidget(self._build_profiles_group())
+        root_layout.addWidget(build_summary_group(self))
         root_layout.addStretch(1)
 
         self.setCentralWidget(central_widget)
         self._refresh_view()
-
-    def _build_header(self) -> QWidget:
-        header = QWidget(self)
-        layout = QVBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        title = QLabel("PySide6 Frontend")
-        title.setObjectName("windowTitle")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
-
-        subtitle = QLabel(
-            "First shell: select input files and an output directory using the new Qt state model."
-        )
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #5f6b7a;")
-
-        actions = QWidget(header)
-        actions_layout = QHBoxLayout(actions)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(8)
-        actions_layout.addStretch(1)
-        self.open_download_manager_button = QPushButton("Downloads", actions)
-        self.open_download_manager_button.clicked.connect(self._open_download_manager)
-        actions_layout.addWidget(self.open_download_manager_button)
-
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addWidget(actions)
-        return header
-
-    def _build_paths_group(self) -> QGroupBox:
-        group = QGroupBox("Paths")
-        layout = QGridLayout(group)
-        layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(12)
-
-        input_label = QLabel("Input Files")
-        self.input_paths_field = QPlainTextEdit()
-        self.input_paths_field.setReadOnly(True)
-        self.input_paths_field.setPlaceholderText("No input files selected")
-        self.input_paths_field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        input_buttons = QWidget(group)
-        input_buttons_layout = QVBoxLayout(input_buttons)
-        input_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        input_buttons_layout.setSpacing(8)
-        self.select_inputs_button = QPushButton("Select Files")
-        self.clear_inputs_button = QPushButton("Clear")
-        input_buttons_layout.addWidget(self.select_inputs_button)
-        input_buttons_layout.addWidget(self.clear_inputs_button)
-        input_buttons_layout.addStretch(1)
-
-        output_label = QLabel("Output Folder")
-        output_row = QWidget(group)
-        output_layout = QHBoxLayout(output_row)
-        output_layout.setContentsMargins(0, 0, 0, 0)
-        output_layout.setSpacing(8)
-        self.output_path_field = QLineEdit()
-        self.output_path_field.setReadOnly(True)
-        self.output_path_field.setPlaceholderText("No output folder selected")
-        self.select_output_button = QPushButton("Choose Folder")
-        self.clear_output_button = QPushButton("Clear")
-        output_layout.addWidget(self.output_path_field, 1)
-        output_layout.addWidget(self.select_output_button)
-        output_layout.addWidget(self.clear_output_button)
-
-        layout.addWidget(input_label, 0, 0, alignment=Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self.input_paths_field, 1, 0)
-        layout.addWidget(input_buttons, 1, 1, alignment=Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(output_label, 2, 0)
-        layout.addWidget(output_row, 3, 0, 1, 2)
-        layout.setColumnStretch(0, 1)
-
-        self.select_inputs_button.clicked.connect(self._select_input_files)
-        self.clear_inputs_button.clicked.connect(self._clear_input_files)
-        self.select_output_button.clicked.connect(self._select_output_directory)
-        self.clear_output_button.clicked.connect(self._clear_output_directory)
-
-        return group
-
-    def _build_summary_group(self) -> QGroupBox:
-        group = QGroupBox("Current State")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-
-        self.summary_label = QLabel()
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-
-        layout.addWidget(self.summary_label)
-        return group
-
-    def _build_process_group(self) -> QGroupBox:
-        group = QGroupBox("Processing")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        selector_grid = QGridLayout()
-        selector_grid.setHorizontalSpacing(12)
-        selector_grid.setVerticalSpacing(8)
-
-        process_method_label = QLabel("Process Method")
-        self.process_method_combo = QComboBox(group)
-        self.process_method_combo.currentTextChanged.connect(self._on_process_method_changed)
-        self.reload_models_button = QPushButton("Reload Models", group)
-        self.reload_models_button.clicked.connect(self._reload_models)
-
-        model_select_label = QLabel("Model")
-        self.model_combo = QComboBox(group)
-        self.model_combo.currentTextChanged.connect(self._on_model_changed)
-        self.model_count_label = QLabel()
-        self.model_count_label.setStyleSheet("color: #5f6b7a;")
-
-        selector_grid.addWidget(process_method_label, 0, 0)
-        selector_grid.addWidget(self.process_method_combo, 0, 1)
-        selector_grid.addWidget(self.reload_models_button, 0, 2)
-        selector_grid.addWidget(model_select_label, 1, 0)
-        selector_grid.addWidget(self.model_combo, 1, 1, 1, 2)
-        selector_grid.addWidget(self.model_count_label, 2, 0, 1, 3)
-
-        self.model_label = QLabel("Backend target: detecting...")
-        self.model_label.setWordWrap(True)
-
-        button_row = QWidget(group)
-        button_layout = QHBoxLayout(button_row)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(8)
-        self.process_button = QPushButton("Process with GPU")
-        self.process_button.clicked.connect(self._start_processing)
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self._cancel_processing)
-        button_layout.addWidget(self.process_button)
-        button_layout.addWidget(self.cancel_button)
-        button_layout.addStretch(1)
-
-        self.progress_bar = QProgressBar(group)
-        self.progress_bar.setRange(0, 100)
-
-        self.status_label = QLabel("Idle")
-        self.status_label.setWordWrap(True)
-
-        self.log_console = QPlainTextEdit(group)
-        self.log_console.setReadOnly(True)
-        self.log_console.setPlaceholderText("Processing logs will appear here")
-        self.log_console.setMinimumHeight(180)
-
-        output_group = QGroupBox("Output")
-        output_layout = QGridLayout(output_group)
-        output_layout.setHorizontalSpacing(12)
-        output_layout.setVerticalSpacing(8)
-
-        output_format_label = QLabel("Save Format")
-        self.save_format_combo = QComboBox(output_group)
-        self.save_format_combo.addItems([WAV, FLAC, MP3])
-        self.save_format_combo.currentTextChanged.connect(self._on_save_format_changed)
-
-        wav_type_label = QLabel("Wav Type")
-        self.wav_type_combo = QComboBox(output_group)
-        self.wav_type_combo.addItems(list(WAV_TYPE))
-        self.wav_type_combo.currentTextChanged.connect(self._on_wav_type_changed)
-
-        mp3_bitrate_label = QLabel("MP3 Bitrate")
-        self.mp3_bitrate_combo = QComboBox(output_group)
-        self.mp3_bitrate_combo.addItems(list(MP3_BIT_RATES))
-        self.mp3_bitrate_combo.currentTextChanged.connect(self._on_mp3_bitrate_changed)
-
-        self.add_model_name_checkbox = QCheckBox("Append model name", output_group)
-        self.add_model_name_checkbox.toggled.connect(self._on_add_model_name_changed)
-
-        self.create_model_folder_checkbox = QCheckBox("Create model folder", output_group)
-        self.create_model_folder_checkbox.toggled.connect(self._on_create_model_folder_changed)
-
-        tuning_group = QGroupBox("Tuning")
-        tuning_layout = QGridLayout(tuning_group)
-        tuning_layout.setHorizontalSpacing(12)
-        tuning_layout.setVerticalSpacing(8)
-
-        self.gpu_checkbox = QCheckBox("Prefer GPU", tuning_group)
-        self.gpu_checkbox.toggled.connect(self._on_gpu_changed)
-
-        self.normalize_checkbox = QCheckBox("Normalize output", tuning_group)
-        self.normalize_checkbox.toggled.connect(self._on_normalize_changed)
-
-        self.primary_stem_only_checkbox = QCheckBox("Primary stem only", tuning_group)
-        self.primary_stem_only_checkbox.toggled.connect(self._on_primary_stem_only_changed)
-
-        self.secondary_stem_only_checkbox = QCheckBox("Secondary stem only", tuning_group)
-        self.secondary_stem_only_checkbox.toggled.connect(self._on_secondary_stem_only_changed)
-
-        self.testing_audio_checkbox = QCheckBox("Testing audio mode", tuning_group)
-        self.testing_audio_checkbox.toggled.connect(self._on_testing_audio_changed)
-
-        self.model_sample_mode_checkbox = QCheckBox("Sample mode", tuning_group)
-        self.model_sample_mode_checkbox.toggled.connect(self._on_model_sample_mode_changed)
-
-        self.model_sample_duration_spinbox = QSpinBox(tuning_group)
-        self.model_sample_duration_spinbox.setRange(1, 600)
-        self.model_sample_duration_spinbox.setSuffix(" sec")
-        self.model_sample_duration_spinbox.valueChanged.connect(self._on_model_sample_duration_changed)
-
-        tuning_layout.addWidget(self.gpu_checkbox, 0, 0)
-        tuning_layout.addWidget(self.normalize_checkbox, 0, 1)
-        tuning_layout.addWidget(self.primary_stem_only_checkbox, 1, 0)
-        tuning_layout.addWidget(self.secondary_stem_only_checkbox, 1, 1)
-        tuning_layout.addWidget(self.testing_audio_checkbox, 2, 0)
-        tuning_layout.addWidget(self.model_sample_mode_checkbox, 2, 1)
-        tuning_layout.addWidget(QLabel("Sample Duration"), 3, 0)
-        tuning_layout.addWidget(self.model_sample_duration_spinbox, 3, 1)
-
-        output_layout.addWidget(output_format_label, 0, 0)
-        output_layout.addWidget(self.save_format_combo, 0, 1)
-        output_layout.addWidget(wav_type_label, 1, 0)
-        output_layout.addWidget(self.wav_type_combo, 1, 1)
-        output_layout.addWidget(mp3_bitrate_label, 2, 0)
-        output_layout.addWidget(self.mp3_bitrate_combo, 2, 1)
-        output_layout.addWidget(self.add_model_name_checkbox, 3, 0, 1, 2)
-        output_layout.addWidget(self.create_model_folder_checkbox, 4, 0, 1, 2)
-
-        layout.addLayout(selector_grid)
-        layout.addWidget(self.model_label)
-        layout.addWidget(output_group)
-        layout.addWidget(tuning_group)
-        layout.addWidget(button_row)
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.log_console)
-        layout.addWidget(self._build_advanced_group())
-        return group
-
-    def _build_advanced_group(self) -> QGroupBox:
-        group = QGroupBox("Advanced Model Controls")
-        group_layout = QVBoxLayout(group)
-        group_layout.setContentsMargins(12, 12, 12, 12)
-        group_layout.setSpacing(10)
-
-        self.advanced_toggle_button = QToolButton(group)
-        self.advanced_toggle_button.setText("Show Advanced Controls")
-        self.advanced_toggle_button.setCheckable(True)
-        self.advanced_toggle_button.setChecked(False)
-        self.advanced_toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.advanced_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
-        self.advanced_toggle_button.toggled.connect(self._toggle_advanced_controls)
-
-        self.advanced_container = QWidget(group)
-        self.advanced_container.setVisible(False)
-        advanced_layout = QVBoxLayout(self.advanced_container)
-        advanced_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_layout.setSpacing(12)
-
-        self.vr_advanced_group = QGroupBox("VR")
-        vr_layout = QGridLayout(self.vr_advanced_group)
-        vr_layout.setHorizontalSpacing(12)
-        vr_layout.setVerticalSpacing(8)
-        self.vr_aggression_combo = QComboBox(self.vr_advanced_group)
-        self.vr_aggression_combo.addItems([str(value) for value in VR_AGGRESSION])
-        self.vr_aggression_combo.currentTextChanged.connect(self._on_vr_aggression_changed)
-        self.vr_window_combo = QComboBox(self.vr_advanced_group)
-        self.vr_window_combo.addItems(list(VR_WINDOW))
-        self.vr_window_combo.currentTextChanged.connect(self._on_vr_window_changed)
-        self.vr_batch_size_combo = QComboBox(self.vr_advanced_group)
-        self.vr_batch_size_combo.addItems(list(BATCH_SIZE))
-        self.vr_batch_size_combo.currentTextChanged.connect(self._on_vr_batch_size_changed)
-        self.vr_crop_size_spinbox = QSpinBox(self.vr_advanced_group)
-        self.vr_crop_size_spinbox.setRange(1, 4096)
-        self.vr_crop_size_spinbox.valueChanged.connect(self._on_vr_crop_size_changed)
-        self.vr_tta_checkbox = QCheckBox("TTA", self.vr_advanced_group)
-        self.vr_tta_checkbox.toggled.connect(self._on_vr_tta_changed)
-        self.vr_post_process_checkbox = QCheckBox("Post Process", self.vr_advanced_group)
-        self.vr_post_process_checkbox.toggled.connect(self._on_vr_post_process_changed)
-        self.vr_high_end_checkbox = QCheckBox("High End Mirroring", self.vr_advanced_group)
-        self.vr_high_end_checkbox.toggled.connect(self._on_vr_high_end_changed)
-        self.vr_post_process_threshold_spinbox = QDoubleSpinBox(self.vr_advanced_group)
-        self.vr_post_process_threshold_spinbox.setRange(0.0, 1.0)
-        self.vr_post_process_threshold_spinbox.setSingleStep(0.05)
-        self.vr_post_process_threshold_spinbox.valueChanged.connect(self._on_vr_post_process_threshold_changed)
-        vr_layout.addWidget(QLabel("Aggression"), 0, 0)
-        vr_layout.addWidget(self.vr_aggression_combo, 0, 1)
-        vr_layout.addWidget(QLabel("Window Size"), 1, 0)
-        vr_layout.addWidget(self.vr_window_combo, 1, 1)
-        vr_layout.addWidget(QLabel("Batch Size"), 2, 0)
-        vr_layout.addWidget(self.vr_batch_size_combo, 2, 1)
-        vr_layout.addWidget(QLabel("Crop Size"), 3, 0)
-        vr_layout.addWidget(self.vr_crop_size_spinbox, 3, 1)
-        vr_layout.addWidget(self.vr_tta_checkbox, 4, 0)
-        vr_layout.addWidget(self.vr_post_process_checkbox, 4, 1)
-        vr_layout.addWidget(self.vr_high_end_checkbox, 5, 0)
-        vr_layout.addWidget(QLabel("Post Threshold"), 5, 1)
-        vr_layout.addWidget(self.vr_post_process_threshold_spinbox, 5, 2)
-
-        self.mdx_advanced_group = QGroupBox("MDX")
-        mdx_layout = QGridLayout(self.mdx_advanced_group)
-        mdx_layout.setHorizontalSpacing(12)
-        mdx_layout.setVerticalSpacing(8)
-        self.mdx_stems_combo = QComboBox(self.mdx_advanced_group)
-        self.mdx_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
-        self.mdx_stems_combo.currentTextChanged.connect(self._on_mdx_stems_changed)
-        self.mdx_segment_size_combo = QComboBox(self.mdx_advanced_group)
-        self.mdx_segment_size_combo.setEditable(True)
-        self.mdx_segment_size_combo.addItems([str(value) for value in MDX_SEGMENTS])
-        self.mdx_segment_size_combo.currentTextChanged.connect(self._on_mdx_segment_size_changed)
-        self.mdx_overlap_combo = QComboBox(self.mdx_advanced_group)
-        self.mdx_overlap_combo.addItems([str(value) for value in MDX_OVERLAP])
-        self.mdx_overlap_combo.currentTextChanged.connect(self._on_mdx_overlap_changed)
-        self.mdx_batch_size_combo = QComboBox(self.mdx_advanced_group)
-        self.mdx_batch_size_combo.addItems(list(BATCH_SIZE))
-        self.mdx_batch_size_combo.currentTextChanged.connect(self._on_mdx_batch_size_changed)
-        self.mdx_margin_spinbox = QSpinBox(self.mdx_advanced_group)
-        self.mdx_margin_spinbox.setRange(0, 999999)
-        self.mdx_margin_spinbox.valueChanged.connect(self._on_mdx_margin_changed)
-        self.mdx_compensate_field = QLineEdit(self.mdx_advanced_group)
-        self.mdx_compensate_field.editingFinished.connect(self._on_mdx_compensate_changed)
-        mdx_layout.addWidget(QLabel("Stem Target"), 0, 0)
-        mdx_layout.addWidget(self.mdx_stems_combo, 0, 1)
-        mdx_layout.addWidget(QLabel("Segment Size"), 1, 0)
-        mdx_layout.addWidget(self.mdx_segment_size_combo, 1, 1)
-        mdx_layout.addWidget(QLabel("Overlap"), 2, 0)
-        mdx_layout.addWidget(self.mdx_overlap_combo, 2, 1)
-        mdx_layout.addWidget(QLabel("Batch Size"), 3, 0)
-        mdx_layout.addWidget(self.mdx_batch_size_combo, 3, 1)
-        mdx_layout.addWidget(QLabel("Margin"), 4, 0)
-        mdx_layout.addWidget(self.mdx_margin_spinbox, 4, 1)
-        mdx_layout.addWidget(QLabel("Compensate"), 5, 0)
-        mdx_layout.addWidget(self.mdx_compensate_field, 5, 1)
-
-        self.demucs_advanced_group = QGroupBox("Demucs")
-        demucs_layout = QGridLayout(self.demucs_advanced_group)
-        demucs_layout.setHorizontalSpacing(12)
-        demucs_layout.setVerticalSpacing(8)
-        self.demucs_stems_combo = QComboBox(self.demucs_advanced_group)
-        self.demucs_stems_combo.addItems([ALL_STEMS, *STEM_SET_MENU])
-        self.demucs_stems_combo.currentTextChanged.connect(self._on_demucs_stems_changed)
-        self.demucs_segment_combo = QComboBox(self.demucs_advanced_group)
-        self.demucs_segment_combo.addItems([str(value) for value in DEMUCS_SEGMENTS])
-        self.demucs_segment_combo.currentTextChanged.connect(self._on_demucs_segment_changed)
-        self.demucs_overlap_combo = QComboBox(self.demucs_advanced_group)
-        self.demucs_overlap_combo.addItems([str(value) for value in DEMUCS_OVERLAP])
-        self.demucs_overlap_combo.currentTextChanged.connect(self._on_demucs_overlap_changed)
-        self.demucs_shifts_spinbox = QSpinBox(self.demucs_advanced_group)
-        self.demucs_shifts_spinbox.setRange(0, 100)
-        self.demucs_shifts_spinbox.valueChanged.connect(self._on_demucs_shifts_changed)
-        self.demucs_margin_spinbox = QSpinBox(self.demucs_advanced_group)
-        self.demucs_margin_spinbox.setRange(0, 999999)
-        self.demucs_margin_spinbox.valueChanged.connect(self._on_demucs_margin_changed)
-        demucs_layout.addWidget(QLabel("Stem Target"), 0, 0)
-        demucs_layout.addWidget(self.demucs_stems_combo, 0, 1)
-        demucs_layout.addWidget(QLabel("Segment"), 1, 0)
-        demucs_layout.addWidget(self.demucs_segment_combo, 1, 1)
-        demucs_layout.addWidget(QLabel("Overlap"), 2, 0)
-        demucs_layout.addWidget(self.demucs_overlap_combo, 2, 1)
-        demucs_layout.addWidget(QLabel("Shifts"), 3, 0)
-        demucs_layout.addWidget(self.demucs_shifts_spinbox, 3, 1)
-        demucs_layout.addWidget(QLabel("Margin"), 4, 0)
-        demucs_layout.addWidget(self.demucs_margin_spinbox, 4, 1)
-
-        self.composition_group = QGroupBox("Workflow Composition")
-        composition_layout = QGridLayout(self.composition_group)
-        composition_layout.setHorizontalSpacing(12)
-        composition_layout.setVerticalSpacing(8)
-        self.demucs_pre_proc_checkbox = QCheckBox("Enable Demucs Pre-Proc", self.composition_group)
-        self.demucs_pre_proc_checkbox.toggled.connect(self._on_demucs_pre_proc_enabled_changed)
-        self.demucs_pre_proc_model_combo = QComboBox(self.composition_group)
-        self.demucs_pre_proc_model_combo.currentTextChanged.connect(self._on_demucs_pre_proc_model_changed)
-        self.demucs_pre_proc_inst_mix_checkbox = QCheckBox("Save Instrumental Mixture", self.composition_group)
-        self.demucs_pre_proc_inst_mix_checkbox.toggled.connect(self._on_demucs_pre_proc_inst_mix_changed)
-        self.vocal_splitter_checkbox = QCheckBox("Enable Vocal Splitter", self.composition_group)
-        self.vocal_splitter_checkbox.toggled.connect(self._on_vocal_splitter_enabled_changed)
-        self.vocal_splitter_model_combo = QComboBox(self.composition_group)
-        self.vocal_splitter_model_combo.currentTextChanged.connect(self._on_vocal_splitter_model_changed)
-        self.vocal_splitter_save_inst_checkbox = QCheckBox("Save Split Instrumentals", self.composition_group)
-        self.vocal_splitter_save_inst_checkbox.toggled.connect(self._on_vocal_splitter_save_inst_changed)
-        composition_layout.addWidget(self.demucs_pre_proc_checkbox, 0, 0, 1, 2)
-        composition_layout.addWidget(QLabel("Pre-Proc Model"), 1, 0)
-        composition_layout.addWidget(self.demucs_pre_proc_model_combo, 1, 1)
-        composition_layout.addWidget(self.demucs_pre_proc_inst_mix_checkbox, 2, 0, 1, 2)
-        composition_layout.addWidget(self.vocal_splitter_checkbox, 3, 0, 1, 2)
-        composition_layout.addWidget(QLabel("Vocal Splitter Model"), 4, 0)
-        composition_layout.addWidget(self.vocal_splitter_model_combo, 4, 1)
-        composition_layout.addWidget(self.vocal_splitter_save_inst_checkbox, 5, 0, 1, 2)
-
-        self.secondary_models_group = QGroupBox("Secondary Models")
-        secondary_layout = QGridLayout(self.secondary_models_group)
-        secondary_layout.setHorizontalSpacing(12)
-        secondary_layout.setVerticalSpacing(8)
-        self.secondary_models_checkbox = QCheckBox("Enable secondary models for selected method", self.secondary_models_group)
-        self.secondary_models_checkbox.toggled.connect(self._on_secondary_models_enabled_changed)
-        secondary_layout.addWidget(self.secondary_models_checkbox, 0, 0, 1, 3)
-        secondary_layout.addWidget(QLabel("Stem"), 1, 0)
-        secondary_layout.addWidget(QLabel("Model"), 1, 1)
-        secondary_layout.addWidget(QLabel("Scale"), 1, 2)
-        for row_index, (slot, label) in enumerate(SECONDARY_MODEL_SLOTS, start=2):
-            combo = QComboBox(self.secondary_models_group)
-            combo.currentTextChanged.connect(
-                lambda value, slot=slot: self._on_secondary_model_changed(slot, value)
-            )
-            scale = QDoubleSpinBox(self.secondary_models_group)
-            scale.setRange(0.01, 0.99)
-            scale.setSingleStep(0.01)
-            scale.setDecimals(2)
-            scale.valueChanged.connect(
-                lambda value, slot=slot: self._on_secondary_model_scale_changed(slot, value)
-            )
-            self.secondary_model_combos[slot] = combo
-            self.secondary_scale_spinboxes[slot] = scale
-            secondary_layout.addWidget(QLabel(label), row_index, 0)
-            secondary_layout.addWidget(combo, row_index, 1)
-            secondary_layout.addWidget(scale, row_index, 2)
-
-        advanced_layout.addWidget(self.vr_advanced_group)
-        advanced_layout.addWidget(self.mdx_advanced_group)
-        advanced_layout.addWidget(self.demucs_advanced_group)
-        advanced_layout.addWidget(self.composition_group)
-        advanced_layout.addWidget(self.secondary_models_group)
-        group_layout.addWidget(self.advanced_toggle_button)
-        group_layout.addWidget(self.advanced_container)
-        return group
 
     def _select_input_files(self) -> None:
         start_dir = self._dialog_directory()
@@ -567,6 +113,8 @@ class MainWindow(QMainWindow):
         input_paths = self.state.paths.input_paths
         self.input_paths_field.setPlainText("\n".join(input_paths))
         self.output_path_field.setText(self.state.paths.export_path)
+        self.last_error_action.setEnabled(bool(self.state.runtime.last_error))
+        self._refresh_profile_controls()
         self._refresh_processing_controls()
         self._refresh_output_controls()
         self._refresh_tuning_controls()
@@ -1349,7 +897,7 @@ class MainWindow(QMainWindow):
         )
 
         self.processing_thread = QThread(self)
-        self.processing_worker = _ProcessingWorker(self._get_processing_facade(), self.state)
+        self.processing_worker = ProcessingWorker(self._get_processing_facade(), self.state)
         self.processing_worker.moveToThread(self.processing_thread)
 
         self.processing_thread.started.connect(self.processing_worker.run)
@@ -1423,6 +971,7 @@ class MainWindow(QMainWindow):
             status_text="Failed",
             last_error=message,
         )
+        self._show_error_dialog("Processing Failed", message)
 
     def _cleanup_processing_thread(self) -> None:
         if self.processing_worker is not None:
@@ -1431,38 +980,3 @@ class MainWindow(QMainWindow):
             self.processing_thread.deleteLater()
         self.processing_worker = None
         self.processing_thread = None
-
-
-class _ProcessingWorker(QObject):
-    finished = Signal(object)
-    cancelled = Signal()
-    failed = Signal(str)
-    log_emitted = Signal(str)
-    progress_emitted = Signal(int)
-    status_emitted = Signal(str)
-
-    def __init__(self, facade: ProcessingFacade, state: AppState):
-        super().__init__()
-        self.facade = facade
-        self.state = state
-
-    def cancel(self) -> None:
-        self.facade.cancel()
-
-    def run(self) -> None:
-        try:
-            result = self.facade.process(
-                self.state,
-                log=self.log_emitted.emit,
-                progress=lambda value: self.progress_emitted.emit(int(max(0, min(value, 100)))),
-                status=self.status_emitted.emit,
-            )
-        except JobCancelledError:
-            self.cancelled.emit()
-            return
-        except Exception as exc:
-            error_message = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-            self.failed.emit(error_message)
-            return
-
-        self.finished.emit(result)

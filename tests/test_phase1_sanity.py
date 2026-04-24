@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from gui_data.constants import ALIGN_INPUTS, ALL_STEMS, CHANGE_PITCH, DEFAULT_DATA, ENSEMBLE_PARTITION, INST_STEM, MATCH_INPUTS, NO_MODEL, TIME_STRETCH, VOCAL_STEM, VR_ARCH_PM
 from uvr.config.models import AppSettings
 from uvr.config.persistence import DEFAULT_DATA_FILE, load_settings, save_settings
+from uvr.config.profiles import ProfileError, SettingsProfileStore
 from uvr.runtime import RuntimePaths, build_runtime_paths
 from uvr.services.cache import SourceCache
 from uvr.services.catalog import ModelCatalog, discover_models, list_installed_models
@@ -110,6 +111,39 @@ class PersistenceTests(unittest.TestCase):
             self.assertTrue(migrated_file.is_file())
             migrated_payload = yaml.safe_load(migrated_file.read_text(encoding="utf-8"))
             self.assertEqual(migrated_payload["save_format"], "MP3")
+
+
+class SettingsProfileStoreTests(unittest.TestCase):
+    def test_save_and_load_profile_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = SettingsProfileStore(default_data=DEFAULT_DATA, profiles_dir=Path(tmp_dir))
+            payload = dict(DEFAULT_DATA)
+            payload["chosen_process_method"] = "MDX-Net"
+            payload["mdx_net_model"] = "Model B"
+
+            saved_name = store.save_profile("My Profile", payload)
+            loaded = store.load_profile("My Profile")
+
+            self.assertEqual(saved_name, "My Profile")
+            self.assertEqual(store.list_profiles(), ("My Profile",))
+            self.assertEqual(loaded["chosen_process_method"], "MDX-Net")
+            self.assertEqual(loaded["mdx_net_model"], "Model B")
+
+    def test_invalid_profile_name_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = SettingsProfileStore(default_data=DEFAULT_DATA, profiles_dir=Path(tmp_dir))
+
+            with self.assertRaises(ProfileError):
+                store.save_profile("bad/name", DEFAULT_DATA)
+
+    def test_delete_profile_removes_saved_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = SettingsProfileStore(default_data=DEFAULT_DATA, profiles_dir=Path(tmp_dir))
+            store.save_profile("Delete Me", DEFAULT_DATA)
+
+            store.delete_profile("Delete Me")
+
+            self.assertEqual(store.list_profiles(), ())
 
 
 class CatalogServiceTests(unittest.TestCase):
@@ -1565,6 +1599,10 @@ class MainWindowTests(unittest.TestCase):
             ),
         )
 
+    def _make_profile_store(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        return tmp_dir, SettingsProfileStore(default_data=DEFAULT_DATA, profiles_dir=Path(tmp_dir.name))
+
     def test_save_format_switches_output_controls(self) -> None:
         from uvr_core.jobs import ResolvedModel
         from uvr_qt.services.processing_facade import ProcessingFacade
@@ -1849,6 +1887,252 @@ class MainWindowTests(unittest.TestCase):
                 self.assertIn("Select an installed vocal splitter model", window.summary_label.text())
             finally:
                 window.close()
+
+    def test_help_menu_actions_open_dialogs(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
+            "uvr_qt.ui.main_window_support.QMessageBox"
+        ) as message_box:
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade(), config_path="qt-config.yaml")
+            try:
+                window.quick_start_action.trigger()
+                window.about_action.trigger()
+
+                message_box.information.assert_called_once()
+                message_box.about.assert_called_once()
+                self.assertIn("qt-config.yaml", message_box.about.call_args.args[2])
+            finally:
+                window.close()
+
+    def test_last_error_action_tracks_runtime_error_state(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                self.assertFalse(window.last_error_action.isEnabled())
+
+                window._set_runtime(last_error="RuntimeError: boom")
+
+                self.assertTrue(window.last_error_action.isEnabled())
+                with mock.patch.object(window, "_show_error_dialog") as show_error_dialog:
+                    window.last_error_action.trigger()
+
+                    show_error_dialog.assert_called_once_with("Last Processing Error", "RuntimeError: boom")
+            finally:
+                window.close()
+
+    def test_processing_failed_records_error_and_opens_dialog(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        with mock.patch("uvr_qt.ui.main_window.save_settings"):
+            window = MainWindow(state=self._make_state(), processing_facade=FakeFacade())
+            try:
+                with mock.patch.object(window, "_show_error_dialog") as show_error_dialog:
+                    window._processing_failed("RuntimeError: boom\ntraceback")
+
+                self.assertEqual(window.state.runtime.status_text, "Failed")
+                self.assertEqual(window.state.runtime.last_error, "RuntimeError: boom\ntraceback")
+                self.assertIn("RuntimeError: boom", window.log_console.toPlainText())
+                show_error_dialog.assert_called_once_with("Processing Failed", "RuntimeError: boom\ntraceback")
+            finally:
+                window.close()
+
+    def test_save_profile_writes_current_state(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A", "Model B")
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel(state.processing.process_method, state.models.vr_model or "Model A", "vr")
+
+        profile_tmp, profile_store = self._make_profile_store()
+        try:
+            state = replace(
+                self._make_state(),
+                processing=replace(self._make_state().processing, process_method="MDX-Net"),
+                models=replace(self._make_state().models, mdx_net_model="Model B"),
+            )
+            with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
+                "uvr_qt.ui.main_window_support.QInputDialog.getText",
+                return_value=("MDX Profile", True),
+            ):
+                window = MainWindow(state=state, processing_facade=FakeFacade(), profile_store=profile_store)
+                try:
+                    window._save_profile()
+
+                    self.assertEqual(profile_store.list_profiles(), ("MDX Profile",))
+                    saved_profile = profile_store.load_profile("MDX Profile")
+                    self.assertEqual(saved_profile["chosen_process_method"], "MDX-Net")
+                    self.assertEqual(saved_profile["mdx_net_model"], "Model B")
+                    self.assertEqual(window.profile_combo.currentText(), "MDX Profile")
+                finally:
+                    window.close()
+        finally:
+            profile_tmp.cleanup()
+
+    def test_load_profile_applies_saved_workflow_and_preserves_paths(self) -> None:
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture", "MDX-Net", "Demucs")
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A", "Model B")
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR", "MDX-Net: Aux MDX")
+
+            def resolve_model(self, state: AppState):
+                selected_model = state.models.mdx_net_model if state.processing.process_method == "MDX-Net" else state.models.vr_model
+                return ResolvedModel(state.processing.process_method, selected_model or "Model A", "vr")
+
+        profile_tmp, profile_store = self._make_profile_store()
+        try:
+            payload = dict(DEFAULT_DATA)
+            payload["chosen_process_method"] = "MDX-Net"
+            payload["mdx_net_model"] = "Model B"
+            payload["save_format"] = "MP3"
+            payload["is_add_model_name"] = True
+            profile_store.save_profile("MDX Profile", payload)
+
+            state = self._make_state()
+            state = replace(
+                state,
+                paths=replace(state.paths, input_paths=("keep.wav",), export_path="keep-out", last_directory="keep-dir"),
+            )
+            with mock.patch("uvr_qt.ui.main_window.save_settings"):
+                window = MainWindow(state=state, processing_facade=FakeFacade(), profile_store=profile_store)
+                try:
+                    window.profile_combo.setCurrentText("MDX Profile")
+                    window._load_profile()
+
+                    self.assertEqual(window.state.processing.process_method, "MDX-Net")
+                    self.assertEqual(window.state.models.mdx_net_model, "Model B")
+                    self.assertEqual(window.state.output.save_format, "MP3")
+                    self.assertTrue(window.state.output.add_model_name)
+                    self.assertEqual(window.state.paths.input_paths, ("keep.wav",))
+                    self.assertEqual(window.state.paths.export_path, "keep-out")
+                    self.assertEqual(window.state.paths.last_directory, "keep-dir")
+                finally:
+                    window.close()
+        finally:
+            profile_tmp.cleanup()
+
+    def test_delete_profile_removes_selection(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from uvr_core.jobs import ResolvedModel
+        from uvr_qt.services.processing_facade import ProcessingFacade
+        from uvr_qt.ui.main_window import MainWindow
+
+        class FakeFacade(ProcessingFacade):
+            def __init__(self) -> None:
+                pass
+
+            def available_process_methods(self):
+                return ("VR Architecture",)
+
+            def available_models_for_method(self, process_method: str):
+                return ("Model A",)
+
+            def available_tagged_models_for_methods(self, process_methods):
+                return ("VR Architecture: Aux VR",)
+
+            def resolve_model(self, state: AppState):
+                return ResolvedModel("VR Architecture", state.models.vr_model, "vr")
+
+        profile_tmp, profile_store = self._make_profile_store()
+        try:
+            profile_store.save_profile("Delete Me", DEFAULT_DATA)
+            with mock.patch("uvr_qt.ui.main_window.save_settings"), mock.patch(
+                "uvr_qt.ui.main_window_support.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window = MainWindow(state=self._make_state(), processing_facade=FakeFacade(), profile_store=profile_store)
+                try:
+                    window.profile_combo.setCurrentText("Delete Me")
+                    window._delete_profile()
+
+                    self.assertEqual(profile_store.list_profiles(), ())
+                    self.assertEqual(window.profile_combo.count(), 0)
+                finally:
+                    window.close()
+        finally:
+            profile_tmp.cleanup()
 
 
 class DownloadManagerWindowTests(unittest.TestCase):
