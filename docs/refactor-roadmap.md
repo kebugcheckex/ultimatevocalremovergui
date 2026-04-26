@@ -45,18 +45,16 @@ Key boundary: anything a web UI would eventually need sits under `uvr/` or `uvr_
 ## Current Status Snapshot
 
 - `uvr/config/`, `uvr/domain/`, `uvr/services/processing.py`, `uvr/services/catalog.py`, `uvr/services/cache.py`, and `uvr/services/downloads.py` exist.
-- `uvr_core/` now exposes typed requests, typed events, and headless jobs for separation, downloads, manual ensemble, and audio tools.
+- `uvr_core/` exposes typed requests, typed events, and headless jobs for separation, downloads, manual ensemble, audio tools, and per-model default management.
 - `uvr/runtime.py` owns backend runtime/bootstrap and path configuration, with env-var overrides for model/base paths.
 - `uvr_cli/` imports from `uvr_core`/`uvr` rather than `uvr_qt`, supports `separate`, `ensemble`, `audio-tool`, `download`, `refresh-catalog`, and `config`, and supports machine-readable JSON output for listings and progress events.
-- The CLI is runnable standalone via `python -m uvr_cli` and does not require `PySide6` or any Phase 4 Qt module.
-- `uvr_qt/` now has a runnable PySide6 shell via `python -m uvr_qt.app`, typed app state, a main window, and a thin processing facade over `uvr_core`.
-- The Qt main workflow now supports input/output selection, process-method/model selection, start/cancel, progress/log display, persistence through `uvr/config`, and a collapsible advanced-controls panel for VR/MDX/Demucs settings.
-- The Qt window also now exposes MDX/Demucs stem targeting, first-pass workflow-composition controls for Demucs pre-proc and vocal-splitter selection, and typed per-stem secondary-model assignment/scales using shared `uvr_core` resolver hooks.
-- `uvr_qt/` now also has a separate download-manager window backed by `uvr_core.jobs.DownloadJob`, covering catalog refresh, VIP code entry, model-type filtering, download progress, and logs.
-- Persistence now defaults to YAML (`data/config.yaml`) with compatibility loading from legacy `data.pkl` and one-shot migration on first read of the new default path.
-- Full Tk parity is not reached: audio-tool UI, ensemble helpers, model/default editors, and the remaining popup-driven workflows still live outside the Qt frontend.
-- `ProcessingController` and the remaining Tk download/UI orchestration still depend on the `MainWindow` UI surface.
-- Downloads, cache, model catalog, ensemble, and audio tools are now reachable headlessly through `uvr/` and `uvr_core/`, while `UVR.py` still owns Tk widget/thread state for the legacy app shell.
+- The CLI is runnable standalone via `python -m uvr_cli` and does not require `PySide6`.
+- `uvr_qt/` has a runnable PySide6 shell via `python -m uvr_qt.app` with typed app state, a main window, and a facade/worker/signal layer over `uvr_core`.
+- The Qt main workflow supports input/output selection, process-method/model selection, start/cancel, progress/log display, persistence through `uvr/config`, a collapsible advanced-controls panel, MDX/Demucs stem targeting, first-pass workflow-composition for Demucs pre-proc and vocal-splitter, and per-stem secondary-model assignment/scales.
+- Separate Qt windows exist for download management, manual ensemble, and audio tools; non-modal dialogs exist for advanced settings, saved profiles, and model defaults.
+- Persistence defaults to YAML (`data/config.yaml`) with compatibility loading from legacy `data.pkl` and one-shot migration on first read.
+- Phase 5 is complete: all mainstream secondary workflows (downloads, ensemble, audio tools, model defaults, profiles, help/error dialogs) are reachable through the Qt frontend without opening `UVR.py`.
+- The remaining gap before Phase 6 is that `UVR.py` and `uvr/ui/` (Tk-only modules) have not yet been deleted, and the Tk app is still the documented entry point.
 
 ## Roadmap
 
@@ -151,10 +149,17 @@ Phase 4 exit status:
 - Ensemble helpers, saved settings profiles, help/about/error dialogs.
 - Audio-tool panels.
 
+Design note: less-frequently-used features are intentionally kept out of the main window. They live in separate `QMainWindow` instances (ensemble, audio tools, downloads) or non-modal `QDialog` instances (advanced settings, profiles, model defaults), opened from the Tools menu and reused on repeated invocations.
+
 Current progress:
 
-- the download manager piece has started: Qt now has a separate window for catalog refresh and model downloads on top of `uvr_core.jobs.DownloadJob`
-- the help/about/error-dialog slice has started: the Qt main window now exposes quick-start/about actions and a reusable detailed error dialog for failed processing runs
+- **Download manager** — done: `uvr_qt/ui/download_manager_window.py`, a separate window for catalog refresh and model downloads on top of `uvr_core.jobs.DownloadJob`.
+- **Help / about / error dialogs** — done: quick-start, about, and detailed error dialogs in `uvr_qt/ui/dialogs/info_dialogs.py`; wired into the main window Help menu.
+- **Saved settings profiles** — done: `uvr/config/profiles.py` (backend store) + `uvr_qt/ui/dialogs/profiles_dialog.py` (non-modal Qt dialog); reachable from Tools → Manage Profiles.
+- **Manual ensemble** — done: `uvr_qt/ui/ensemble_window.py`, a separate window with input-file list, algorithm/format/flag controls, output folder, and progress/log display; backed by `EnsembleFacade` → `uvr_core.jobs.EnsembleJob`. Reachable from Tools → Manual Ensemble.
+- **Audio tools** — done: `uvr_qt/ui/audio_tools_window.py`, a separate window with a top tool-selector and per-tool settings groups that show/hide (Align Inputs, Matchering, Time Stretch, Change Pitch, Manual Ensemble); backed by `AudioToolFacade` → `uvr_core.jobs.AudioToolJob`. Reachable from Tools → Audio Tools.
+- **Model defaults editor** — done: `uvr_qt/ui/dialogs/model_defaults_dialog.py`, a non-modal dialog that saves or deletes per-model default parameters (VR and MDX architectures) via two new backend methods — `SeparationJob.save_model_defaults()` and `SeparationJob.delete_model_defaults()` — which write/remove the model's hash-keyed JSON file. Reachable from Tools → Model Defaults.
+- **Supporting infrastructure** — `uvr_qt/services/tool_facades.py` (`EnsembleFacade`, `AudioToolFacade`) and `uvr_qt/ui/tool_workers.py` (`EnsembleWorker`, `AudioToolWorker`) follow the same facade/worker/signal pattern established in Phases 3–4.
 
 **Exit:** Tk `UVR.py` is no longer needed for any supported workflow.
 

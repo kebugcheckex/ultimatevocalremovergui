@@ -366,6 +366,56 @@ class SeparationJob:
             for model in list_installed_models(self.catalog)
         ]
 
+    def save_model_defaults(self, request: SeparationRequest) -> str:
+        """Save the current request settings as per-model defaults.
+
+        Returns the model name whose defaults were saved.
+        Supports VR and MDX architectures; Demucs does not use hash-based defaults.
+        """
+        resolved = self.resolve_model(request)
+        if resolved is None:
+            raise RuntimeError("No model could be resolved from the current selection.")
+        if resolved.process_method not in (VR_ARCH_PM, VR_ARCH_TYPE, MDX_ARCH_TYPE):
+            raise RuntimeError(
+                f'Model defaults are only supported for VR and MDX models, not "{resolved.process_method}".'
+            )
+        ModelData(
+            resolved.model_name,
+            selected_process_method=VR_ARCH_TYPE if resolved.process_method == VR_ARCH_PM else resolved.process_method,
+            settings=self._build_settings(resolved.process_method, request),
+            resolvers=self._build_resolvers(request),
+            is_change_def=True,
+        )
+        return resolved.model_name
+
+    def delete_model_defaults(self, request: SeparationRequest) -> str:
+        """Delete the stored per-model defaults for the currently resolved model.
+
+        Returns the model name whose defaults were deleted, or raises if no
+        hash file was found.
+        """
+        import os
+
+        resolved = self.resolve_model(request)
+        if resolved is None:
+            raise RuntimeError("No model could be resolved from the current selection.")
+        if resolved.process_method not in (VR_ARCH_PM, VR_ARCH_TYPE, MDX_ARCH_TYPE):
+            raise RuntimeError(
+                f'Model defaults are only supported for VR and MDX models, not "{resolved.process_method}".'
+            )
+        model_data = ModelData(
+            resolved.model_name,
+            selected_process_method=VR_ARCH_TYPE if resolved.process_method == VR_ARCH_PM else resolved.process_method,
+            settings=self._build_settings(resolved.process_method, request),
+            resolvers=self._build_resolvers(request),
+            is_get_hash_dir_only=True,
+        )
+        hash_file = getattr(model_data, "model_hash_dir", None)
+        if not hash_file or not os.path.isfile(hash_file):
+            raise RuntimeError(f'No saved defaults found for "{resolved.model_name}".')
+        os.remove(hash_file)
+        return resolved.model_name
+
     def _build_model(
         self,
         resolved_model: ResolvedModel,

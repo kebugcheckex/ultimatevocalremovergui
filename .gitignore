@@ -11,3 +11,4 @@ models/**/*.safetensors
 models/**/*.bin
 models/Demucs_Models/v3_v4_repo/
 .codex
+.vscode/

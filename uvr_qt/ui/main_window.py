@@ -14,9 +14,12 @@ from uvr.config.persistence import save_settings
 from uvr.config.profiles import SettingsProfileStore
 from uvr_qt.services import ProcessResult, ProcessingFacade
 from uvr_qt.state import AppState
+from uvr_qt.ui.audio_tools_window import AudioToolsWindow
 from uvr_qt.ui.dialogs.advanced_settings_dialog import AdvancedSettingsDialog
+from uvr_qt.ui.dialogs.model_defaults_dialog import ModelDefaultsDialog
 from uvr_qt.ui.dialogs.profiles_dialog import ProfilesDialog
 from uvr_qt.ui.download_manager_window import DownloadManagerWindow
+from uvr_qt.ui.ensemble_window import EnsembleWindow
 from uvr_qt.ui.main_window_builders import build_header, build_paths_group, build_process_group, build_summary_group
 from uvr_qt.ui.main_window_handlers import MainWindowHandlersMixin
 from uvr_qt.ui.main_window_refresh import MainWindowRefreshMixin
@@ -41,8 +44,11 @@ class MainWindow(MainWindowRefreshMixin, MainWindowHandlersMixin, MainWindowDial
         self.processing_facade: ProcessingFacade | None = processing_facade
         self.profile_store = profile_store or SettingsProfileStore(default_data=DEFAULT_DATA)
         self.download_manager_window: DownloadManagerWindow | None = None
+        self.ensemble_window: EnsembleWindow | None = None
+        self.audio_tools_window: AudioToolsWindow | None = None
         self._advanced_dialog: AdvancedSettingsDialog | None = None
         self._profiles_dialog: ProfilesDialog | None = None
+        self._model_defaults_dialog: ModelDefaultsDialog | None = None
         self.processing_thread: QThread | None = None
         self.processing_worker: ProcessingWorker | None = None
         self._is_syncing_processing_controls = False
@@ -121,6 +127,34 @@ class MainWindow(MainWindowRefreshMixin, MainWindowHandlersMixin, MainWindowDial
         self.download_manager_window.show()
         self.download_manager_window.raise_()
         self.download_manager_window.activateWindow()
+
+    def _open_ensemble_window(self) -> None:
+        if self.ensemble_window is None:
+            self.ensemble_window = EnsembleWindow()
+        self.ensemble_window.show()
+        self.ensemble_window.raise_()
+        self.ensemble_window.activateWindow()
+
+    def _open_audio_tools_window(self) -> None:
+        if self.audio_tools_window is None:
+            self.audio_tools_window = AudioToolsWindow()
+        self.audio_tools_window.show()
+        self.audio_tools_window.raise_()
+        self.audio_tools_window.activateWindow()
+
+    def _open_model_defaults_dialog(self) -> None:
+        facade = self._get_processing_facade()
+        if self._model_defaults_dialog is None:
+            self._model_defaults_dialog = ModelDefaultsDialog(
+                state=self.state,
+                facade=facade,
+                parent=self,
+            )
+        else:
+            self._model_defaults_dialog.update_from_state(self.state)
+        self._model_defaults_dialog.show()
+        self._model_defaults_dialog.raise_()
+        self._model_defaults_dialog.activateWindow()
 
     def _open_advanced_settings(self) -> None:
         if self._advanced_dialog is None:

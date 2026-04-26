@@ -33,6 +33,12 @@ class ProcessingFacade:
     def resolve_model(self, state: AppState) -> ResolvedModel | None:
         return self.job.resolve_model(state.to_separation_request())
 
+    def save_model_defaults(self, state: AppState) -> str:
+        return self.job.save_model_defaults(state.to_separation_request())
+
+    def delete_model_defaults(self, state: AppState) -> str:
+        return self.job.delete_model_defaults(state.to_separation_request())
+
     def process(
         self,
         state: AppState,
