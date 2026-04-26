@@ -127,7 +127,7 @@ def configure_backend_runtime() -> Any:
     import time as time_module
     from lib_v5 import spec_utils
     import matchering as match
-    from separate import save_format
+    from uvr.separation.audio_io import save_format
     from uvr.domain import audio_tools as audio_tools_module
     from uvr.domain import ensemble as ensemble_module
 

@@ -31,37 +31,6 @@ from gui_data.constants import (
 )
 
 
-def build_header(window: Any) -> QWidget:
-    header = QWidget(window)
-    layout = QVBoxLayout(header)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(4)
-
-    title = QLabel("PySide6 Frontend")
-    title.setObjectName("windowTitle")
-    title.setStyleSheet("font-size: 24px; font-weight: 700;")
-
-    subtitle = QLabel(
-        "First shell: select input files and an output directory using the new Qt state model."
-    )
-    subtitle.setWordWrap(True)
-    subtitle.setStyleSheet("color: #5f6b7a;")
-
-    actions = QWidget(header)
-    actions_layout = QHBoxLayout(actions)
-    actions_layout.setContentsMargins(0, 0, 0, 0)
-    actions_layout.setSpacing(8)
-    actions_layout.addStretch(1)
-    window.open_download_manager_button = QPushButton("Downloads", actions)
-    window.open_download_manager_button.clicked.connect(window._open_download_manager)
-    actions_layout.addWidget(window.open_download_manager_button)
-
-    layout.addWidget(title)
-    layout.addWidget(subtitle)
-    layout.addWidget(actions)
-    return header
-
-
 def build_paths_group(window: Any) -> QGroupBox:
     group = QGroupBox("Paths")
     layout = QGridLayout(group)

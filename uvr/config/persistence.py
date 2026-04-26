@@ -30,11 +30,6 @@ def save_settings(
 
     path = Path(data_file) if data_file is not None else DEFAULT_DATA_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.suffix.lower() == ".pkl":
-        with path.open("wb") as data_handle:
-            pickle.dump(payload, data_handle)
-        return
-
     with path.open("w", encoding="utf-8") as data_handle:
         yaml.safe_dump(_normalize_for_yaml(payload), data_handle, sort_keys=True, allow_unicode=False)
 
@@ -70,18 +65,12 @@ def load_data(default_data: Any, data_file: str | Path | None = None) -> dict:
 
 def _load_raw_data(path: Path) -> Mapping[str, Any]:
     if path.exists():
-        return _read_path(path)
+        return _read_yaml(path)
 
     if path == DEFAULT_DATA_FILE and LEGACY_DATA_FILE.exists():
         return _read_pickle(LEGACY_DATA_FILE)
 
     raise FileNotFoundError(path)
-
-
-def _read_path(path: Path) -> Mapping[str, Any]:
-    if path.suffix.lower() == ".pkl":
-        return _read_pickle(path)
-    return _read_yaml(path)
 
 
 def _read_yaml(path: Path) -> Mapping[str, Any]:

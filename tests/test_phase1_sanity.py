@@ -44,7 +44,7 @@ from uvr_core.jobs import (
 )
 from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest, SeparationRequest
 from uvr_cli.__main__ import cli
-from separate import mdx_should_use_onnxruntime
+from uvr.separation.device import mdx_should_use_onnxruntime
 from uvr_qt.state.app_state import (
     AdvancedModelControlsState,
     AppState,

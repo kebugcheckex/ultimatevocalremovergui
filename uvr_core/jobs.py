@@ -1,4 +1,7 @@
-"""Framework-neutral processing jobs."""
+"""Framework-neutral processing jobs.
+
+Import the public surface via ``uvr_core`` directly rather than this module.
+"""
 
 from __future__ import annotations
 
@@ -70,7 +73,8 @@ from uvr_core.requests import AudioToolRequest, DownloadRequest, EnsembleRequest
 
 
 configure_backend_runtime()
-from separate import SeperateDemucs, SeperateMDX, SeperateMDXC, SeperateVR, clear_gpu_cache  # noqa: E402
+from uvr.separation import SeperateDemucs, SeperateMDX, SeperateMDXC, SeperateVR  # noqa: E402
+from uvr.separation.device import clear_gpu_cache  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -133,16 +137,23 @@ EventSubscriber = Callable[[Event], None]
 
 
 class SeparationJob:
-    """Thin job wrapper around the legacy separation backend."""
+    """Thin job wrapper around the legacy separation backend.
+
+    Not thread-safe.  Create a new instance for each job run, or reuse one
+    instance sequentially.  Call ``cancel()`` from any thread to interrupt a
+    running ``run()`` call.
+    """
 
     def __init__(self) -> None:
         self.catalog = load_model_catalog()
         self._cancel_requested = ThreadEvent()
 
     def cancel(self) -> None:
+        """Signal the running job to stop at the next cancellation checkpoint."""
         self._cancel_requested.set()
 
     def available_process_methods(self) -> tuple[str, ...]:
+        """Return the process methods for which at least one model is installed."""
         methods = []
         for model in self._available_models():
             if model.process_method not in methods:
@@ -150,6 +161,7 @@ class SeparationJob:
         return tuple(methods)
 
     def available_models_for_method(self, process_method: str) -> tuple[str, ...]:
+        """Return the names of installed models for a given process method."""
         return tuple(
             model.model_name
             for model in self._available_models()
@@ -157,6 +169,7 @@ class SeparationJob:
         )
 
     def available_tagged_models_for_methods(self, process_methods: tuple[str, ...]) -> tuple[str, ...]:
+        """Return ``"method//model"`` tagged strings for use in ensemble model lists."""
         return tuple(
             f"{model.process_method}{ENSEMBLE_PARTITION}{model.model_name}"
             for model in self._available_models()
@@ -164,6 +177,11 @@ class SeparationJob:
         )
 
     def available_stem_targets(self, request: SeparationRequest, process_method: str) -> tuple[str, ...]:
+        """Return the stem names the selected model can produce for ``process_method``.
+
+        Always includes ``ALL_STEMS`` for multi-stem models.  Falls back to
+        ``(ALL_STEMS,)`` when the model cannot be loaded or resolved.
+        """
         scoped_request = SeparationRequest(
             input_paths=request.input_paths,
             export_path=request.export_path,
@@ -197,6 +215,7 @@ class SeparationJob:
         return (ALL_STEMS,)
 
     def resolve_model(self, request: SeparationRequest) -> ResolvedModel | None:
+        """Return the best-matching installed model for the request, or None."""
         available = self._available_models()
         preferred_method = request.options.process_method
 
@@ -231,6 +250,13 @@ class SeparationJob:
         *,
         subscriber: EventSubscriber | None = None,
     ) -> ProcessResult:
+        """Separate all input files and return a ProcessResult.
+
+        Emits StatusEvent, LogEvent, and ProgressEvent to ``subscriber`` as
+        each file is processed.  Emits a terminal ResultEvent on success.
+        Raises JobCancelledError if cancel() was called during processing.
+        Raises RuntimeError for validation failures or missing models.
+        """
         self._cancel_requested.clear()
         resolved_model = self.resolve_model(request)
         if resolved_model is None:
@@ -795,7 +821,12 @@ class SeparationJob:
 
 
 class DownloadJob:
-    """Thin job wrapper around the framework-neutral download services."""
+    """Thin job wrapper around the framework-neutral download services.
+
+    Stateless after construction; safe to reuse across sequential calls.
+    ``opener`` is a urllib-compatible callable used for all HTTP requests;
+    leave it None to use ``urllib.request.urlopen``.
+    """
 
     def __init__(
         self,
@@ -807,6 +838,7 @@ class DownloadJob:
         self.opener = opener
 
     def available_downloads(self, vip_code: str = "") -> AvailableDownloads:
+        """Fetch the online catalog and return the list of downloadable items."""
         online_state = fetch_online_state(opener=self._opener())
         decoded_vip_link = validate_vip_code(vip_code) if vip_code else NO_CODE
         catalog = build_download_catalog(online_state.payload, decoded_vip_link=decoded_vip_link)
@@ -824,6 +856,7 @@ class DownloadJob:
         vip_code: str = "",
         refresh_model_settings: bool = True,
     ) -> CatalogRefreshResult:
+        """Fetch the online catalog and optionally refresh bundled model settings."""
         available = self.available_downloads(vip_code)
         refreshed_settings = None
         if refresh_model_settings:
@@ -839,6 +872,11 @@ class DownloadJob:
         *,
         subscriber: EventSubscriber | None = None,
     ) -> DownloadJobResult:
+        """Download the requested model and return a DownloadJobResult.
+
+        Emits StatusEvent, LogEvent, and ProgressEvent to ``subscriber``.
+        Emits a terminal DownloadResultEvent on success.
+        """
         self._emit(subscriber, StatusEvent(message="Refreshing download catalog"))
         online_state = fetch_online_state(opener=self._opener())
         decoded_vip_link = validate_vip_code(request.vip_code) if request.vip_code else NO_CODE
@@ -914,6 +952,12 @@ class EnsembleJob:
         *,
         subscriber: EventSubscriber | None = None,
     ) -> EnsembleJobResult:
+        """Ensemble the input files and return an EnsembleJobResult.
+
+        Requires at least two input files.  Emits StatusEvent, LogEvent, and
+        ProgressEvent to ``subscriber``.  Emits a terminal EnsembleResultEvent
+        on success.
+        """
         input_paths = tuple(path for path in request.input_paths if path)
         if len(input_paths) < 2:
             raise RuntimeError("Manual ensemble requires at least two input files.")
@@ -1000,6 +1044,12 @@ class AudioToolJob:
         *,
         subscriber: EventSubscriber | None = None,
     ) -> AudioToolJobResult:
+        """Run the requested audio tool and return an AudioToolJobResult.
+
+        Emits StatusEvent, LogEvent, and ProgressEvent to ``subscriber``.
+        Emits a terminal AudioToolResultEvent on success.
+        Raises RuntimeError for unsupported tool / input count combinations.
+        """
         input_paths = tuple(path for path in request.input_paths if path)
         if not input_paths:
             raise RuntimeError("No input files selected.")

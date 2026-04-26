@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         default=None,
-        help=f"Settings YAML/pickle path. Defaults to {default_config_path()}.",
+        help=f"Settings YAML path. Defaults to {default_config_path()}.",
     )
     args, qt_args = parser.parse_known_args()
     sys.argv = [sys.argv[0], *qt_args]
