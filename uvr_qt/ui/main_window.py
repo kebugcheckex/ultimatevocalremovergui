@@ -20,7 +20,7 @@ from uvr_qt.ui.dialogs.model_defaults_dialog import ModelDefaultsDialog
 from uvr_qt.ui.dialogs.profiles_dialog import ProfilesDialog
 from uvr_qt.ui.download_manager_window import DownloadManagerWindow
 from uvr_qt.ui.ensemble_window import EnsembleWindow
-from uvr_qt.ui.main_window_builders import build_header, build_paths_group, build_process_group, build_summary_group
+from uvr_qt.ui.main_window_builders import build_paths_group, build_process_group, build_summary_group
 from uvr_qt.ui.main_window_handlers import MainWindowHandlersMixin
 from uvr_qt.ui.main_window_refresh import MainWindowRefreshMixin
 from uvr_qt.ui.main_window_support import MainWindowDialogMixin
@@ -60,7 +60,6 @@ class MainWindow(MainWindowRefreshMixin, MainWindowHandlersMixin, MainWindowDial
         root_layout = QVBoxLayout(central_widget)
         root_layout.setContentsMargins(24, 24, 24, 24)
         root_layout.setSpacing(16)
-        root_layout.addWidget(build_header(self))
         root_layout.addWidget(build_paths_group(self))
         root_layout.addWidget(build_process_group(self))
         root_layout.addWidget(build_summary_group(self))

@@ -180,13 +180,13 @@ Use the following commands based on your system type:
 **For Debian-based systems (Ubuntu, Mint, etc.):**
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt-get install -y ffmpeg python3-pip python3-tk
+sudo apt-get install -y ffmpeg python3-pip
 ```
 
 **For Arch-based systems (EndeavourOS):**
 ```bash
 sudo pacman -Syu
-sudo pacman -S ffmpeg python-pip tk
+sudo pacman -S ffmpeg python-pip
 ```
 
 ---
@@ -220,7 +220,7 @@ Setting up a virtual environment (venv) ensures that the program's dependencies 
 #### **Step 4: Run the Application**
 While the virtual environment is activated, start the application:
 ```bash
-python UVR.py
+python -m uvr_qt.app
 ```
 
 ---

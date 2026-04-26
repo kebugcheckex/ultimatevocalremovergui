@@ -52,7 +52,7 @@ from onnx import load
 from onnx2pytorch import ConvertModel
  
 if TYPE_CHECKING:
-    from UVR import ModelData
+    from uvr.domain.model_data import ModelData
 
 # if not is_macos:
 #     import torch_directml
